@@ -1,0 +1,53 @@
+name: build-and-release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Build debug APK
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleDebug --no-daemon
+
+      - name: Rename artifact
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk "woilaibangni-${GITHUB_REF_NAME}-debug.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: woilaibangni-debug-apk
+          path: woilaibangni-*-debug.apk
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: woilaibangni-*-debug.apk
+          generate_release_notes: true
+          body: |
+            「我来帮你」M0 骨架版。
+
+            - 五入口界面（对话 / 只听 / 短句 / 看世界 / 语音）
+            - 录音 → VAD → 字幕链路（当前为演示引擎）
+            - 拍照 → 重排 → 朗读链路（当前为演示 OCR）
+            - 模型分包仓库（下载 / 校验 / 解压）
+
+            已知：真实 sherpa-onnx 识别与 PP-OCRv5 推理尚未接入。
