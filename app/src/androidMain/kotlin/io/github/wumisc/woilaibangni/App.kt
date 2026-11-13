@@ -141,12 +141,17 @@ fun App() {
         val deck = remember { BoardDefaults.deck() }
         var engineReady by remember { mutableStateOf(false) }
         LaunchedEffect(Unit) {
-            ocrReader.prepare(File(context.filesDir, "models/ocr").absolutePath)
-            val models = File(context.filesDir, "models")
-            engineReady = asr.prepare(
-                File(models, "asr-stream").absolutePath,
-                File(models, "asr-accurate").absolutePath,
-            )
+            // 启动阶段不碰任何原生库：模型缺失时 prepare 会在查文件后直接返回 false
+            runCatching {
+                ocrReader.prepare(File(context.filesDir, "models/ocr").absolutePath)
+            }
+            runCatching {
+                val models = File(context.filesDir, "models")
+                engineReady = asr.prepare(
+                    File(models, "asr-stream").absolutePath,
+                    File(models, "asr-accurate").absolutePath,
+                )
+            }
         }
         DisposableEffect(Unit) {
             onDispose {

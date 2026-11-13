@@ -1,5 +1,18 @@
 # 更新日志
 
+## v0.4.2-m5（2026-11-13）
+
+启动不再碰原生库。
+
+### 修复
+- `PpOcrEngine` 的 `OrtEnvironment` 改为 `by lazy`：之前一构造就加载 `libonnxruntime.so`，
+  模型缺失时也会走 native 初始化，是启动闪退的头号嫌疑。
+- `PpOcrTextReader.prepare` 与启动阶段的模型准备全部 `runCatching` 兜底。
+
+### 排查用
+- 启动后先看 `app.log` 有没有「日志开始」：有 → 说明 `onCreate` 跑完了，崩溃在 UI 之后；
+  没有 → 崩在更早的初始化。
+
 ## v0.4.1-m4（2026-11-13）
 
 启动加固。

@@ -79,8 +79,13 @@ class PpOcrTextReader(private val minConfidence: Float = 0.5f) : TextReader {
     override val isReady: Boolean get() = engine?.isReady == true
 
     override suspend fun prepare(modelDir: String): Boolean = withContext(Dispatchers.IO) {
-        val e = engine ?: PpOcrEngine(modelDir).also { engine = it }
-        e.load()
+        runCatching {
+            val e = engine ?: PpOcrEngine(modelDir).also { engine = it }
+            e.load()
+        }.getOrElse {
+            LogHub.error(LogHub.Channel.OCR, "WOILAI_OCR", "OCR 准备失败", it)
+            false
+        }
     }
 
     override suspend fun read(bitmap: Bitmap): List<OcrLine> = withContext(Dispatchers.Default) {

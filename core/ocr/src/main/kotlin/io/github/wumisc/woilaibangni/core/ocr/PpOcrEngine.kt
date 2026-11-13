@@ -22,7 +22,8 @@ import java.nio.FloatBuffer
  */
 class PpOcrEngine(private val modelDir: String) {
 
-    private val env: OrtEnvironment = OrtEnvironment.getEnvironment()
+    // 关键：不要在建��时就碰 ORT。构造即加载 .so，模型缺失时会变成启动崩溃。
+    private val env: OrtEnvironment by lazy { OrtEnvironment.getEnvironment() }
     private var detSession: OrtSession? = null
     private var recSession: OrtSession? = null
     private var dict: List<String> = emptyList()
