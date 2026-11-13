@@ -63,12 +63,14 @@ class AsrSession(
     fun start(): Boolean {
         if (_state.value.listening) return true
         val ok = recorder.start { frame -> onFrame(frame) }
+        LogHub.asr("WOILAI_ASR", "recorder start=$ok")
         _state.value = _state.value.copy(listening = ok, error = if (ok) null else "无法打开麦克风，请检查录音权限")
         return ok
     }
 
     fun stop() {
         recorder.stop()
+        LogHub.asr("WOILAI_ASR", "recorder stopped")
         _state.value = _state.value.copy(listening = false, speaking = false)
     }
 

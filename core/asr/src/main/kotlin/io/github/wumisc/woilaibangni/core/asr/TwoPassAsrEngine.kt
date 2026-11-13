@@ -43,6 +43,9 @@ class TwoPassAsrEngine(
     var offlineReady: Boolean = false
         private set
 
+    /** 流式引擎的失败原因，便于界面直说。 */
+    val lastError: String? get() = (streaming as? SherpaStreamingAsrEngine)?.lastError
+
     override suspend fun prepare(modelDir: String): Boolean = prepare(modelDir, modelDir)
 
     /**

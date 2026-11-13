@@ -1,5 +1,24 @@
 # 更新日志
 
+## v0.5.1-m7（2026-11-13）
+
+修三处反馈：
+
+### 1. 点拍照闪退
+Manifest 声明了 `CAMERA` 权限却没请求，`TakePicturePreview` 启动系统相机时抛 `SecurityException`，
+异常没接住 → 进程直接死。现在点拍照先申请权限，授权后再拉起相机；
+相机返回空、识别抛异常都只显示一行提示，不再崩。
+
+### 2. 深色模式
+界面颜色原先全写死（白底黑字），系统切暗色后仍是白板。现在统一收敛到 Light/Dark 两套
+`Palette`，随系统 `isSystemInDarkTheme()` 切换；`values-night` 另配了窗口底色，避免启动白闪。
+
+### 3. 点「开始对话」没反应
+- 按钮不再受 `engineReady` 限制，随时可按；未就绪时直接把原因写在字幕框里
+  （`SherpaStreamingAsrEngine.lastError`），不再"点了像没点"。
+- 录音源 `VOICE_RECOGNITION` 被系统拒绝时自动退到 `MIC`。
+- 录音开始/停止写 `asr.log`，方便回传排查。
+
 ## v0.5.0-m6（2026-11-13）
 
 首次出现两种发行包。

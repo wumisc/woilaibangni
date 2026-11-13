@@ -32,30 +32,22 @@ class PcmRecorder(
         )
         if (minBuf <= 0) return false
 
-        val rec = try {
-            AudioRecord.Builder()
-                .setAudioSource(MediaRecorder.AudioSource.VOICE_RECOGNITION)
-                .setAudioFormat(
-                    AudioFormat.Builder()
-                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                        .setSampleRate(sampleRate)
-                        .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
-                        .build()
-                )
-                .setBufferSizeInBytes(minBuf * 2)
-                .build()
-        } catch (t: Throwable) {
-            null
-        } ?: return false
-
-        if (rec.state != AudioRecord.STATE_INITIALIZED) {
-            rec.release()
-            return false
-        }
+        // 有些系统（HyperOS / 部分定制 ROM）会拒绝 VOICE_RECOGNITION，退到 MIC 再试一次
+        val sources = listOf(
+            MediaRecorder.AudioSource.VOICE_RECOGNITION,
+            MediaRecorder.AudioSource.MIC,
+        )
+        val rec = sources.firstNotNullOfOrNull { source -> build(source, minBuf) } ?: return false
 
         record = rec
         running = true
-        rec.startRecording()
+        runCatching { rec.startRecording() }
+            .onFailure {
+                running = false
+                record = null
+                rec.release()
+                return false
+            }
 
         worker = thread(name = "pcm-recorder", isDaemon = true) {
             val buf = ShortArray(frameSize)
@@ -65,6 +57,24 @@ class PcmRecorder(
             }
         }
         return true
+    }
+
+    private fun build(source: Int, minBuf: Int): AudioRecord? = try {
+        AudioRecord.Builder()
+            .setAudioSource(source)
+            .setAudioFormat(
+                AudioFormat.Builder()
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .setSampleRate(sampleRate)
+                    .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
+                    .build()
+            )
+            .setBufferSizeInBytes(minBuf * 2)
+            .build()
+            .takeIf { it.state == AudioRecord.STATE_INITIALIZED }
+            ?: return null
+    } catch (t: Throwable) {
+        null
     }
 
     fun stop() {

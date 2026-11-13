@@ -29,6 +29,10 @@ class SherpaStreamingAsrEngine(private val threads: Int = 2) : StreamingAsrEngin
     override var isReady: Boolean = false
         private set
 
+    /** 最近一次初始化失败的原因，UI 直接显示，避免"点了没反应"。 */
+    var lastError: String? = null
+        private set
+
     override suspend fun prepare(modelDir: String): Boolean = withContext(Dispatchers.IO) {
         if (isReady) return@withContext true
         val encoder = File(modelDir, "encoder.onnx")
@@ -60,9 +64,11 @@ class SherpaStreamingAsrEngine(private val threads: Int = 2) : StreamingAsrEngin
             recognizer = rec
             stream = rec.createStream()
             isReady = true
+            lastError = null
             LogHub.asr(TAG, "流式识别已加载 threads=$threads")
             true
         }.getOrElse {
+            lastError = it.message ?: it::class.java.simpleName
             LogHub.error(LogHub.Channel.ASR, TAG, "流式识别初始化失败", it)
             isReady = false
             false

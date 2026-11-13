@@ -44,8 +44,9 @@ import kotlinx.coroutines.delay
  *   给手抬不起来、只能按一个开关的用户用。
  */
 @Composable
-fun BoardScreen(
+internal fun BoardScreen(
     deck: AacDeck,
+    palette: Palette,
     onSpeak: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -56,7 +57,7 @@ fun BoardScreen(
 
     val board = deck.board(boardId)
     if (board == null) {
-        BasicText("没有可用的板", style = TextStyle(fontSize = 18.sp, color = Color(0xFF6B7280)))
+        BasicText("没有可用的板", style = TextStyle(fontSize = 18.sp, color = palette.hint))
         return
     }
     val scanner = remember(board) { SwitchScanner(board, ScanMode.LINEAR) }
@@ -99,14 +100,14 @@ fun BoardScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color(0xFF0E1116), RoundedCornerShape(12.dp))
+                .background(palette.captionBg, RoundedCornerShape(12.dp))
                 .padding(horizontal = 14.dp, vertical = 12.dp),
         ) {
             BasicText(
                 text = phrase.ifBlank { "点格子组句，或直接点一句说出来" },
                 style = TextStyle(
                     fontSize = 18.sp,
-                    color = if (phrase.isBlank()) Color(0xFF9AA3B2) else Color(0xFFFFD75E),
+                    color = if (phrase.isBlank()) palette.captionSub else palette.captionText,
                 ),
             )
         }
@@ -126,13 +127,13 @@ fun BoardScreen(
                             .background(
                                 when {
                                     button == null -> Color(0x00000000)
-                                    isHighlighted -> Color(0xFF0A6CFF)
-                                    else -> Color.White
+                                    isHighlighted -> palette.accent
+                                    else -> palette.card
                                 },
                                 RoundedCornerShape(14.dp),
                             )
                             .then(
-                                if (button != null) Modifier.border(0.5.dp, Color(0xFFE3E6ED), RoundedCornerShape(14.dp))
+                                if (button != null) Modifier.border(0.5.dp, palette.hint.copy(alpha = 0.35f), RoundedCornerShape(14.dp))
                                 else Modifier
                             )
                             .semantics {
@@ -147,7 +148,7 @@ fun BoardScreen(
                                 style = TextStyle(
                                     fontSize = 17.sp,
                                     fontWeight = FontWeight.Medium,
-                                    color = if (isHighlighted) Color.White else Color(0xFF161A22),
+                                    color = if (isHighlighted) Color.White else palette.textPrimary,
                                 ),
                             )
                         }
@@ -163,21 +164,21 @@ fun BoardScreen(
                 modifier = Modifier
                     .weight(1f)
                     .height(52.dp)
-                    .background(if (scanEnabled) Color(0xFF0A6CFF) else Color(0xFFEDF0F5), RoundedCornerShape(14.dp))
+                    .background(if (scanEnabled) palette.accent else palette.accentSoft, RoundedCornerShape(14.dp))
                     .semantics { contentDescription = if (scanEnabled) "关闭开关扫描" else "开启开关扫描" }
                     .clickable { scanEnabled = !scanEnabled },
                 contentAlignment = Alignment.Center,
             ) {
                 BasicText(
                     text = if (scanEnabled) "扫描中 · 关闭" else "开关扫描",
-                    style = TextStyle(fontSize = 16.sp, color = if (scanEnabled) Color.White else Color(0xFF3D4353)),
+                    style = TextStyle(fontSize = 16.sp, color = if (scanEnabled) Color.White else palette.textSecondary),
                 )
             }
             Box(
                 modifier = Modifier
                     .weight(1f)
                     .height(52.dp)
-                    .background(Color(0xFF0A6CFF), RoundedCornerShape(14.dp))
+                    .background(palette.accent, RoundedCornerShape(14.dp))
                     .semantics { contentDescription = "选择当前高亮的格子" }
                     .clickable(enabled = scanEnabled) {
                         val picked = scanner.select()
@@ -195,18 +196,18 @@ fun BoardScreen(
                 modifier = Modifier
                     .weight(1f)
                     .height(46.dp)
-                    .background(Color(0xFFF5F6F9), RoundedCornerShape(12.dp))
+                    .background(palette.accentSoft, RoundedCornerShape(12.dp))
                     .clickable { boardId = deck.rootBoard?.id },
                 contentAlignment = Alignment.Center,
-            ) { BasicText("回首页", style = TextStyle(fontSize = 15.sp, color = Color(0xFF3D4353))) }
+            ) { BasicText("回首页", style = TextStyle(fontSize = 15.sp, color = palette.textSecondary)) }
             Box(
                 modifier = Modifier
                     .weight(1f)
                     .height(46.dp)
-                    .background(Color(0xFFF5F6F9), RoundedCornerShape(12.dp))
+                    .background(palette.accentSoft, RoundedCornerShape(12.dp))
                     .clickable { phrase = "" },
                 contentAlignment = Alignment.Center,
-            ) { BasicText("清空句子", style = TextStyle(fontSize = 15.sp, color = Color(0xFF3D4353))) }
+            ) { BasicText("清空句子", style = TextStyle(fontSize = 15.sp, color = palette.textSecondary)) }
         }
     }
 }

@@ -2,14 +2,15 @@ package io.github.wumisc.woilaibangni
 
 import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
-import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,11 +29,11 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.key
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,11 +50,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import io.github.wumisc.woilaibangni.core.asr.AsrSession
-import io.github.wumisc.woilaibangni.core.asr.SherpaStreamingAsrEngine
-import io.github.wumisc.woilaibangni.core.asr.SherpaOfflineAsrEngine
-import io.github.wumisc.woilaibangni.core.asr.TwoPassAsrEngine
+import io.github.wumisc.woilaibangni.core.aac.AacDeck
 import io.github.wumisc.woilaibangni.core.aac.BoardDefaults
+import io.github.wumisc.woilaibangni.core.asr.AsrSession
+import io.github.wumisc.woilaibangni.core.asr.SherpaOfflineAsrEngine
+import io.github.wumisc.woilaibangni.core.asr.SherpaStreamingAsrEngine
+import io.github.wumisc.woilaibangni.core.asr.TwoPassAsrEngine
 import io.github.wumisc.woilaibangni.core.log.LogHub
 import io.github.wumisc.woilaibangni.core.ocr.PpOcrTextReader
 import io.github.wumisc.woilaibangni.core.ocr.ReadingPipeline
@@ -123,6 +125,49 @@ private val modes = listOf(
     ),
 )
 
+/** 明暗两套颜色，界面所有颜色都从这里取，不再写死。 */
+internal data class Palette(
+    val background: Color,
+    val card: Color,
+    val textPrimary: Color,
+    val textSecondary: Color,
+    val hint: Color,
+    val accent: Color,
+    val accentSoft: Color,
+    val captionBg: Color,
+    val captionText: Color,
+    val captionSub: Color,
+    val danger: Color,
+)
+
+private val LightPalette = Palette(
+    background = Color(0xFFF7F8FA),
+    card = Color.White,
+    textPrimary = Color(0xFF111318),
+    textSecondary = Color(0xFF3D4353),
+    hint = Color(0xFF8A8F9C),
+    accent = Color(0xFF0A6CFF),
+    accentSoft = Color(0xFFEAF1FF),
+    captionBg = Color(0xFF0E1116),
+    captionText = Color(0xFFFFD75E),
+    captionSub = Color(0xFF9AA3B2),
+    danger = Color(0xFFE5484D),
+)
+
+private val DarkPalette = Palette(
+    background = Color(0xFF0B0C0F),
+    card = Color(0xFF16181D),
+    textPrimary = Color(0xFFF2F3F5),
+    textSecondary = Color(0xFFC2C8D2),
+    hint = Color(0xFF8B93A1),
+    accent = Color(0xFF4C8DFF),
+    accentSoft = Color(0xFF1B2740),
+    captionBg = Color(0xFF05060A),
+    captionText = Color(0xFFFFD75E),
+    captionSub = Color(0xFF9AA3B2),
+    danger = Color(0xFFFF6B6E),
+)
+
 @Composable
 fun App() {
     MiuixTheme {
@@ -130,17 +175,23 @@ fun App() {
         remember { runCatching { LogHub.init(context) }; true }
         val scope = rememberCoroutineScope()
 
+        val palette = if (isSystemInDarkTheme()) DarkPalette else LightPalette
+
+        val streaming = remember { SherpaStreamingAsrEngine() }
         val asr = remember {
-            AsrSession(
-                engine = TwoPassAsrEngine(SherpaStreamingAsrEngine(), SherpaOfflineAsrEngine()),
-            )
+            AsrSession(engine = TwoPassAsrEngine(streaming, SherpaOfflineAsrEngine()))
         }
         val speaker = remember { AndroidTextSpeaker(context) }
         val ocrReader = remember { PpOcrTextReader() }
         val reading = remember { ReadingPipeline(ocrReader) }
         val deck = remember { BoardDefaults.deck() }
+
         var engineReady by remember { mutableStateOf(false) }
         var setupHint by remember { mutableStateOf<String?>(null) }
+        var notReadyReason by remember { mutableStateOf<String?>(null) }
+        var readText by remember { mutableStateOf("") }
+        var readHint by remember { mutableStateOf<String?>(null) }
+
         LaunchedEffect(Unit) {
             // full 包：首次启动把内置模型解包到私有目录（约 210MB，一次性）
             if (BundledModels.hasBundled(context)) {
@@ -148,7 +199,6 @@ fun App() {
                 BundledModels.install(context) { pct -> setupHint = "正在安装内置模型 $pct%" }
                 setupHint = null
             }
-            // 启动阶段不碰任何原生库：模型缺失时 prepare 会在查文件后直接返回 false
             runCatching {
                 ocrReader.prepare(File(context.filesDir, "models/ocr").absolutePath)
             }
@@ -158,8 +208,18 @@ fun App() {
                     File(models, "asr-stream").absolutePath,
                     File(models, "asr-accurate").absolutePath,
                 )
+                if (!engineReady) {
+                    val dir = File(models, "asr-stream")
+                    notReadyReason = streaming.lastError
+                        ?: "模型文件不完整：$dir（需要 encoder/decoder/joiner/tokens）"
+                    LogHub.asr("WOILAI_ASR", "not ready: $notReadyReason")
+                }
+            }.onFailure {
+                notReadyReason = it.message ?: "对话引擎初始化失败"
+                LogHub.error(LogHub.Channel.ASR, "WOILAI_ASR", "启动准备失败", it)
             }
         }
+
         DisposableEffect(Unit) {
             onDispose {
                 asr.release()
@@ -169,49 +229,88 @@ fun App() {
         }
 
         val asrState by asr.state.collectAsState()
-        var readText by remember { mutableStateOf("") }
         var selected by remember { mutableIntStateOf(0) }
+
+        fun given(permission: String) = ContextCompat.checkSelfPermission(
+            context, permission
+        ) == PackageManager.PERMISSION_GRANTED
 
         val micPermission = rememberLauncherForActivityResult(
             ActivityResultContracts.RequestPermission()
-        ) { granted -> if (granted) asr.start() }
+        ) { granted ->
+            if (granted) asr.start()
+            else notReadyReason = "没有录音权限，无法开始对话"
+        }
 
         val camera = rememberLauncherForActivityResult(
             ActivityResultContracts.TakePicturePreview()
         ) { bitmap ->
-            if (bitmap != null) {
+            if (bitmap == null) {
+                readHint = "没有拿到照片，可能取消了拍摄"
+            } else {
                 scope.launch {
-                    val result = reading.read(bitmap)
-                    readText = result.paragraphs.joinToString("\n")
-                    speaker.speak(result.paragraphs.firstOrNull() ?: "")
+                    runCatching {
+                        val result = reading.read(bitmap)
+                        readText = result.paragraphs.joinToString("\n")
+                        readHint = if (result.paragraphs.isEmpty()) {
+                            "这张图里没识别到文字，靠近一点、光线亮一点再试"
+                        } else null
+                        if (result.paragraphs.isNotEmpty()) {
+                            speaker.speak(result.paragraphs.first())
+                        }
+                    }.onFailure {
+                        readHint = "识别失败：${it.message ?: "未知原因"}"
+                        LogHub.error(LogHub.Channel.OCR, "WOILAI_OCR", "拍照识别失败", it)
+                    }
                 }
             }
         }
 
-        Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF7F8FA))) {
+        val cameraPermission = rememberLauncherForActivityResult(
+            ActivityResultContracts.RequestPermission()
+        ) { granted ->
+            // 声明了 CAMERA 权限就必须先拿到授权，否则启动系统相机直接抛 SecurityException
+            if (granted) {
+                runCatching { camera.launch(null) }
+                    .onFailure { readHint = "无法打开相机：${it.message ?: "未知原因"}" }
+            } else {
+                readHint = "没有相机权限，无法拍照"
+            }
+        }
+
+        Column(modifier = Modifier.fillMaxSize().background(palette.background)) {
             Content(
                 mode = modes[selected],
                 deck = deck,
+                palette = palette,
                 engineReady = engineReady,
+                notReadyReason = notReadyReason,
                 setupHint = setupHint,
                 asrState = asrState,
                 readText = readText,
+                readHint = readHint,
                 onToggleMic = {
                     if (asrState.listening) {
                         asr.stop()
+                    } else if (!given(Manifest.permission.RECORD_AUDIO)) {
+                        micPermission.launch(Manifest.permission.RECORD_AUDIO)
                     } else {
-                        val granted = ContextCompat.checkSelfPermission(
-                            context, Manifest.permission.RECORD_AUDIO
-                        ) == PackageManager.PERMISSION_GRANTED
-                        if (granted) asr.start()
-                        else micPermission.launch(Manifest.permission.RECORD_AUDIO)
+                        val ok = asr.start()
+                        if (!ok) notReadyReason = asrState.error ?: "无法打开麦克风"
                     }
                 },
-                onCapture = { camera.launch(null) },
+                onCapture = {
+                    if (!given(Manifest.permission.CAMERA)) {
+                        cameraPermission.launch(Manifest.permission.CAMERA)
+                    } else {
+                        runCatching { camera.launch(null) }
+                            .onFailure { readHint = "无法打开相机：${it.message ?: "未知原因"}" }
+                    }
+                },
                 onSpeak = { speaker.speak(it) },
                 modifier = Modifier.weight(1f),
             )
-            TabBar(selected = selected, onSelect = { selected = it })
+            TabBar(selected = selected, palette = palette, onSelect = { selected = it })
         }
     }
 }
@@ -219,11 +318,14 @@ fun App() {
 @Composable
 private fun Content(
     mode: Mode,
-    deck: io.github.wumisc.woilaibangni.core.aac.AacDeck,
+    deck: AacDeck,
+    palette: Palette,
     engineReady: Boolean,
+    notReadyReason: String?,
     setupHint: String?,
     asrState: AsrSession.UiState,
     readText: String,
+    readHint: String?,
     onToggleMic: () -> Unit,
     onCapture: () -> Unit,
     onSpeak: (String) -> Unit,
@@ -238,17 +340,28 @@ private fun Content(
     ) {
         BasicText(
             text = mode.title,
-            style = TextStyle(fontSize = 30.sp, fontWeight = FontWeight.Bold, color = Color(0xFF111318)),
+            style = TextStyle(fontSize = 30.sp, fontWeight = FontWeight.Bold, color = palette.textPrimary),
             modifier = Modifier.semantics { heading() },
         )
         Spacer(Modifier.height(10.dp))
-        BasicText(text = mode.headline, style = TextStyle(fontSize = 18.sp, color = Color(0xFF3D4353)))
+        BasicText(text = mode.headline, style = TextStyle(fontSize = 18.sp, color = palette.textSecondary))
         Spacer(Modifier.height(20.dp))
 
+        setupHint?.let {
+            BasicText(text = it, style = TextStyle(fontSize = 15.sp, color = palette.accent))
+            Spacer(Modifier.height(12.dp))
+        }
+
         when (mode.title) {
-            "面对面", "只听" -> LiveCaptionCard(asrState, engineReady, onToggleMic)
-            "看世界" -> ReadCard(readText, onCapture, onSpeak)
-            "短句板" -> BoardScreen(deck = deck, onSpeak = onSpeak)
+            "面对面", "只听" -> LiveCaptionCard(
+                state = asrState,
+                ready = engineReady,
+                notReadyReason = notReadyReason,
+                palette = palette,
+                onToggleMic = onToggleMic,
+            )
+            "看世界" -> ReadCard(readText, readHint, palette, onCapture, onSpeak)
+            "短句板" -> BoardScreen(deck = deck, palette = palette, onSpeak = onSpeak)
             else -> Unit
         }
 
@@ -258,88 +371,82 @@ private fun Content(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(vertical = 6.dp)
-                    .background(Color.White, RoundedCornerShape(14.dp))
+                    .background(palette.card, RoundedCornerShape(14.dp))
                     .padding(16.dp),
             ) {
-                BasicText(text = line, style = TextStyle(fontSize = 17.sp, color = Color(0xFF1F2430)))
+                BasicText(text = line, style = TextStyle(fontSize = 17.sp, color = palette.textPrimary))
             }
         }
-        setupHint?.let {
-            Spacer(Modifier.height(12.dp))
-            BasicText(text = it, style = TextStyle(fontSize = 15.sp, color = Color(0xFF0A6CFF)))
-        }
-        Spacer(Modifier.height(20.dp))
-        BasicText(
-            text = if (mode.title == "看世界")
-                "当前 OCR 为演示实现：通路已跑通，PP-OCRv5 模型待接入。"
-            else
-                "当前识别为演示引擎：录音→VAD→上屏的通路已跑通，sherpa-onnx 待接入。",
-            style = TextStyle(fontSize = 13.sp, color = Color(0xFF8A8F9C)),
-        )
         Spacer(Modifier.height(10.dp))
-        LogFooter()
+        LogFooter(palette)
     }
 }
 
 @Composable
-private fun LogFooter() {
+private fun LogFooter(palette: Palette) {
     val context = LocalContext.current
     var version by remember { mutableIntStateOf(0) }
     key(version) {
-    BasicText(
-        text = "日志目录：${LogHub.rootPath.ifBlank { "未初始化" }}",
-        style = TextStyle(fontSize = 12.sp, color = Color(0xFF8A8F9C)),
-        modifier = Modifier.semantics { contentDescription = "日志目录，${LogHub.rootPath}" },
-    )
-    if (LogHub.degraded) {
-        Spacer(Modifier.height(4.dp))
         BasicText(
-            text = "（${LogHub.degradedReason}）点这里授予「所有文件访问权限」",
-            style = TextStyle(fontSize = 12.sp, color = Color(0xFFE5484D)),
-            modifier = Modifier.clickable {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    runCatching {
-                        context.startActivity(
-                            Intent(
-                                Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                                Uri.parse("package:${context.packageName}"),
+            text = "日志目录：${LogHub.rootPath.ifBlank { "未初始化" }}",
+            style = TextStyle(fontSize = 12.sp, color = palette.hint),
+            modifier = Modifier.semantics { contentDescription = "日志目录，${LogHub.rootPath}" },
+        )
+        if (LogHub.degraded) {
+            Spacer(Modifier.height(4.dp))
+            BasicText(
+                text = "（${LogHub.degradedReason}）点这里授予「所有文件访问权限」",
+                style = TextStyle(fontSize = 12.sp, color = palette.danger),
+                modifier = Modifier.clickable {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        runCatching {
+                            context.startActivity(
+                                Intent(
+                                    Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                                    Uri.parse("package:${context.packageName}"),
+                                )
                             )
-                        )
+                        }
                     }
-                }
-            },
-        )
-        Spacer(Modifier.height(4.dp))
-        BasicText(
-            text = "授权后点这里刷新目录",
-            style = TextStyle(fontSize = 12.sp, color = Color(0xFF0A6CFF)),
-            modifier = Modifier.clickable {
-                LogHub.init(context)
-                version++
-            },
-        )
-    }
+                },
+            )
+            Spacer(Modifier.height(4.dp))
+            BasicText(
+                text = "授权后点这里刷新目录",
+                style = TextStyle(fontSize = 12.sp, color = palette.accent),
+                modifier = Modifier.clickable {
+                    LogHub.init(context)
+                    version++
+                },
+            )
+        }
     }
 }
 
 @Composable
-private fun LiveCaptionCard(state: AsrSession.UiState, ready: Boolean, onToggleMic: () -> Unit) {
+private fun LiveCaptionCard(
+    state: AsrSession.UiState,
+    ready: Boolean,
+    notReadyReason: String?,
+    palette: Palette,
+    onToggleMic: () -> Unit,
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color(0xFF0E1116), RoundedCornerShape(18.dp))
+            .background(palette.captionBg, RoundedCornerShape(18.dp))
             .padding(18.dp),
     ) {
         BasicText(
             text = when {
-                !ready -> "还没有对话包。把流式模型放进 files/models/asr-stream（encoder/decoder/joiner/tokens）再重启。"
                 state.error != null -> state.error!!
+                !ready -> notReadyReason ?: "对话引擎还没就绪"
                 state.partial.isNotBlank() -> state.partial
                 state.committed.isNotBlank() -> state.committed
                 state.listening -> "正在听……"
                 else -> "点下面的按钮开始"
             },
-            style = TextStyle(fontSize = 22.sp, color = Color(0xFFFFD75E)),
+            style = TextStyle(fontSize = 22.sp, color = palette.captionText),
         )
         Spacer(Modifier.height(12.dp))
         BasicText(
@@ -347,7 +454,7 @@ private fun LiveCaptionCard(state: AsrSession.UiState, ready: Boolean, onToggleM
                 state.firstPartialLatencyMs?.let { append("首字 ${it}ms  ") }
                 state.finalizeLatencyMs?.let { append("定稿 ${it}ms") }
             },
-            style = TextStyle(fontSize = 13.sp, color = Color(0xFF9AA3B2)),
+            style = TextStyle(fontSize = 13.sp, color = palette.captionSub),
         )
         Spacer(Modifier.height(14.dp))
         Box(
@@ -355,34 +462,47 @@ private fun LiveCaptionCard(state: AsrSession.UiState, ready: Boolean, onToggleM
                 .fillMaxWidth()
                 .height(56.dp)
                 .background(
-                    if (state.listening) Color(0xFFE5484D) else Color(0xFF0A6CFF),
+                    if (state.listening) palette.danger else palette.accent,
                     RoundedCornerShape(14.dp),
                 )
                 .semantics { contentDescription = if (state.listening) "停止录音" else "开始录音" }
-                .clickable(enabled = ready, onClick = onToggleMic),
+                .clickable(onClick = onToggleMic),
             contentAlignment = Alignment.Center,
         ) {
             BasicText(
-                text = if (!ready) "未就绪" else if (state.listening) "停止" else "开始对话",
+                text = if (state.listening) "停止" else "开始对话",
                 style = TextStyle(fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White),
+            )
+        }
+        if (state.listening) {
+            Spacer(Modifier.height(10.dp))
+            BasicText(
+                text = if (state.speaking) "检测到声音，正在识别" else "已开始录音，等待声音",
+                style = TextStyle(fontSize = 13.sp, color = palette.captionSub),
             )
         }
     }
 }
 
 @Composable
-private fun ReadCard(text: String, onCapture: () -> Unit, onSpeak: (String) -> Unit) {
+private fun ReadCard(
+    text: String,
+    hint: String?,
+    palette: Palette,
+    onCapture: () -> Unit,
+    onSpeak: (String) -> Unit,
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color.White, RoundedCornerShape(18.dp))
+            .background(palette.card, RoundedCornerShape(18.dp))
             .padding(18.dp),
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(64.dp)
-                .background(Color(0xFF0A6CFF), RoundedCornerShape(16.dp))
+                .background(palette.accent, RoundedCornerShape(16.dp))
                 .semantics { contentDescription = "拍照识字并朗读" }
                 .clickable(onClick = onCapture),
             contentAlignment = Alignment.Center,
@@ -392,31 +512,35 @@ private fun ReadCard(text: String, onCapture: () -> Unit, onSpeak: (String) -> U
                 style = TextStyle(fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White),
             )
         }
+        hint?.let {
+            Spacer(Modifier.height(12.dp))
+            BasicText(text = it, style = TextStyle(fontSize = 15.sp, color = palette.danger))
+        }
         if (text.isNotBlank()) {
             Spacer(Modifier.height(14.dp))
-            BasicText(text = text, style = TextStyle(fontSize = 20.sp, color = Color(0xFF111318)))
+            BasicText(text = text, style = TextStyle(fontSize = 20.sp, color = palette.textPrimary))
             Spacer(Modifier.height(10.dp))
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(52.dp)
-                    .background(Color(0xFFEAF1FF), RoundedCornerShape(14.dp))
+                    .background(palette.accentSoft, RoundedCornerShape(14.dp))
                     .semantics { contentDescription = "重新朗读识别结果" }
                     .clickable { onSpeak(text) },
                 contentAlignment = Alignment.Center,
             ) {
-                BasicText(text = "再念一遍", style = TextStyle(fontSize = 17.sp, color = Color(0xFF0A6CFF)))
+                BasicText(text = "再念一遍", style = TextStyle(fontSize = 17.sp, color = palette.accent))
             }
         }
     }
 }
 
 @Composable
-private fun TabBar(selected: Int, onSelect: (Int) -> Unit) {
+private fun TabBar(selected: Int, palette: Palette, onSelect: (Int) -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color.White)
+            .background(palette.card)
             .padding(horizontal = 8.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically,
@@ -441,7 +565,7 @@ private fun TabBar(selected: Int, onSelect: (Int) -> Unit) {
                     style = TextStyle(
                         fontSize = 15.sp,
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                        color = if (isSelected) Color(0xFF0A6CFF) else Color(0xFF6B7280),
+                        color = if (isSelected) palette.accent else palette.hint,
                     ),
                 )
             }
