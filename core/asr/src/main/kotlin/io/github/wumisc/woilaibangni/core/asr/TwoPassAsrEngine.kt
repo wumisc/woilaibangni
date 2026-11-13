@@ -1,6 +1,6 @@
 package io.github.wumisc.woilaibangni.core.asr
 
-import android.util.Log
+import io.github.wumisc.woilaibangni.core.log.LogHub
 import com.k2fsa.sherpa.onnx.FeatureConfig
 import com.k2fsa.sherpa.onnx.OfflineModelConfig
 import com.k2fsa.sherpa.onnx.OfflineRecognizer
@@ -52,7 +52,7 @@ class TwoPassAsrEngine(
     suspend fun prepare(streamDir: String, offlineDir: String): Boolean {
         val first = runCatching { streaming.prepare(streamDir) }.getOrDefault(false)
         offlineReady = runCatching { offline.prepare(offlineDir) }.getOrDefault(false)
-        Log.i(TAG, "prepare stream=$first offline=$offlineReady")
+        LogHub.asr(TAG, "prepare stream=$first offline=$offlineReady")
         return first
     }
 
@@ -96,7 +96,7 @@ class SherpaOfflineAsrEngine(private val threads: Int = 2) : OfflineAsrEngine {
             .firstOrNull { it.isFile }
         val tokens = File(modelDir, "tokens.txt")
         if (model == null || !tokens.isFile) {
-            Log.w(TAG, "高精度模型不完整：$modelDir")
+            LogHub.asr(TAG, "高精度模型不完整：$modelDir")
             return@withContext false
         }
 
@@ -117,10 +117,10 @@ class SherpaOfflineAsrEngine(private val threads: Int = 2) : OfflineAsrEngine {
             )
             recognizer = OfflineRecognizer(config = config)
             modelReady = true
-            Log.i(TAG, "高精度识别已加载 model=${model.name}")
+            LogHub.asr(TAG, "高精度识别已加载 model=${model.name}")
             true
         }.getOrElse {
-            Log.e(TAG, "高精度识别初始化失败", it)
+            LogHub.error(LogHub.Channel.ASR, TAG, "高精度识别初始化失败", it)
             modelReady = false
             false
         }
@@ -139,7 +139,7 @@ class SherpaOfflineAsrEngine(private val threads: Int = 2) : OfflineAsrEngine {
                 stream.release()
             }
         }.getOrElse {
-            Log.e(TAG, "第二遍识别失败", it)
+            LogHub.error(LogHub.Channel.ASR, TAG, "第二遍识别失败", it)
             null
         }
     }

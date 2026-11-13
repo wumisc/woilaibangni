@@ -1,7 +1,7 @@
 package io.github.wumisc.woilaibangni.core.ocr
 
+import io.github.wumisc.woilaibangni.core.log.LogHub
 import android.graphics.Bitmap
-import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -88,7 +88,7 @@ class PpOcrTextReader(private val minConfidence: Float = 0.5f) : TextReader {
         if (!e.isReady) return@withContext emptyList()
 
         val boxList = e.detect(bitmap)
-        Log.d("WOILAI_OCR", "det boxes=${boxList.size} size=${bitmap.width}x${bitmap.height}")
+        LogHub.ocr("WOILAI_OCR", "det boxes=${boxList.size} size=${bitmap.width}x${bitmap.height}")
 
         boxList.mapNotNull { box ->
             val decoded = e.recognize(bitmap, box) ?: return@mapNotNull null

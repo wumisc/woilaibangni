@@ -1,6 +1,10 @@
 package io.github.wumisc.woilaibangni
 
 import android.Manifest
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -28,6 +32,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.key
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,6 +54,7 @@ import io.github.wumisc.woilaibangni.core.asr.SherpaStreamingAsrEngine
 import io.github.wumisc.woilaibangni.core.asr.SherpaOfflineAsrEngine
 import io.github.wumisc.woilaibangni.core.asr.TwoPassAsrEngine
 import io.github.wumisc.woilaibangni.core.aac.BoardDefaults
+import io.github.wumisc.woilaibangni.core.log.LogHub
 import io.github.wumisc.woilaibangni.core.ocr.PpOcrTextReader
 import io.github.wumisc.woilaibangni.core.ocr.ReadingPipeline
 import io.github.wumisc.woilaibangni.core.tts.AndroidTextSpeaker
@@ -121,6 +127,7 @@ private val modes = listOf(
 fun App() {
     MiuixTheme {
         val context = LocalContext.current
+        remember { LogHub.init(context); true }
         val scope = rememberCoroutineScope()
 
         val asr = remember {
@@ -251,6 +258,49 @@ private fun Content(
                 "当前识别为演示引擎：录音→VAD→上屏的通路已跑通，sherpa-onnx 待接入。",
             style = TextStyle(fontSize = 13.sp, color = Color(0xFF8A8F9C)),
         )
+        Spacer(Modifier.height(10.dp))
+        LogFooter()
+    }
+}
+
+@Composable
+private fun LogFooter() {
+    val context = LocalContext.current
+    var version by remember { mutableIntStateOf(0) }
+    key(version) {
+    BasicText(
+        text = "日志目录：${LogHub.rootPath.ifBlank { "未初始化" }}",
+        style = TextStyle(fontSize = 12.sp, color = Color(0xFF8A8F9C)),
+        modifier = Modifier.semantics { contentDescription = "日志目录，${LogHub.rootPath}" },
+    )
+    if (LogHub.degraded) {
+        Spacer(Modifier.height(4.dp))
+        BasicText(
+            text = "（${LogHub.degradedReason}）点这里授予「所有文件访问权限」",
+            style = TextStyle(fontSize = 12.sp, color = Color(0xFFE5484D)),
+            modifier = Modifier.clickable {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    runCatching {
+                        context.startActivity(
+                            Intent(
+                                Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                                Uri.parse("package:${context.packageName}"),
+                            )
+                        )
+                    }
+                }
+            },
+        )
+        Spacer(Modifier.height(4.dp))
+        BasicText(
+            text = "授权后点这里刷新目录",
+            style = TextStyle(fontSize = 12.sp, color = Color(0xFF0A6CFF)),
+            modifier = Modifier.clickable {
+                LogHub.init(context)
+                version++
+            },
+        )
+    }
     }
 }
 

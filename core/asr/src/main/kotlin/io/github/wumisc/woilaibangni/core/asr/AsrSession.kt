@@ -1,8 +1,8 @@
 package io.github.wumisc.woilaibangni.core.asr
 
 import android.os.SystemClock
-import android.util.Log
 import io.github.wumisc.woilaibangni.core.audio.PcmRecorder
+import io.github.wumisc.woilaibangni.core.log.LogHub
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -97,7 +97,7 @@ class AsrSession(
                 if (partial.isNotBlank()) {
                     val latency = if (!firstPartialLogged) now - utteranceStartedAt else null
                     if (!firstPartialLogged) firstPartialLogged = true
-                    if (latency != null) Log.i(PERF_TAG, "first_partial_ms=$latency")
+                    if (latency != null) LogHub.perf(PERF_TAG, "first_partial_ms=$latency")
                     _state.value = _state.value.copy(
                         partial = partial,
                         firstPartialLatencyMs = latency ?: _state.value.firstPartialLatencyMs,
@@ -111,7 +111,7 @@ class AsrSession(
 
             if (text.isNotBlank()) {
                 val finalizeMs = SystemClock.elapsedRealtime() - finalStart
-                Log.i(PERF_TAG, "finalize_ms=$finalizeMs chars=${text.length}")
+                LogHub.perf(PERF_TAG, "finalize_ms=$finalizeMs chars=${text.length}")
                 _state.value = _state.value.copy(
                     speaking = false,
                     partial = "",
@@ -138,7 +138,7 @@ class AsrSession(
             val current = _state.value
             if (current.committed != firstPass || current.speaking) return@launch
             val cost = SystemClock.elapsedRealtime() - started
-            Log.i(PERF_TAG, "revise_ms=$cost chars=${better.length}")
+            LogHub.perf(PERF_TAG, "revise_ms=$cost chars=${better.length}")
             _state.value = current.copy(committed = better, revised = true)
         }
     }

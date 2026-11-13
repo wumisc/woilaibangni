@@ -1,11 +1,11 @@
 package io.github.wumisc.woilaibangni.core.ocr
 
+import io.github.wumisc.woilaibangni.core.log.LogHub
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import android.graphics.Bitmap
 import android.graphics.Rect
-import android.util.Log
 import java.io.File
 import java.nio.FloatBuffer
 
@@ -35,14 +35,14 @@ class PpOcrEngine(private val modelDir: String) {
         val det = File(modelDir, "det.onnx")
         val rec = File(modelDir, "rec.onnx")
         if (!det.isFile || !rec.isFile) {
-            Log.w(TAG, "缺模型文件：$modelDir")
+            LogHub.ocr(TAG, "缺模型文件：$modelDir")
             return false
         }
         val keys = listOf("ppocr_keys_v1.txt", "keys.txt", "dict.txt")
             .map { File(modelDir, it) }
             .firstOrNull { it.isFile }
         if (keys == null) {
-            Log.w(TAG, "缺字典文件")
+            LogHub.ocr(TAG, "缺字典文件")
             return false
         }
 
@@ -55,10 +55,10 @@ class PpOcrEngine(private val modelDir: String) {
             recSession = env.createSession(rec.absolutePath, options)
             dict = keys.readLines(Charsets.UTF_8).map { it.trimEnd('\r', '\n') }
             isReady = true
-            Log.i(TAG, "OCR 模型已加载 dict=${dict.size}")
+            LogHub.ocr(TAG, "OCR 模型已加载 dict=${dict.size}")
             true
         } catch (t: Throwable) {
-            Log.e(TAG, "OCR 初始化失败", t)
+            LogHub.error(LogHub.Channel.OCR, TAG, "OCR 初始化失败", t)
             close()
             false
         }

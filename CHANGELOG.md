@@ -1,5 +1,23 @@
 # 更新日志
 
+## v0.4.0-m3（2026-11-13）
+
+日志落盘。
+
+### 新增
+- **`core:log` 模块 / `LogHub`**：四路日志分流落盘
+  - `app.log`（启动、崩溃、模块状态）、`perf.log`（`WOILAI_PERF`）、`asr.log`、`ocr.log`；
+  - 目标目录 `/storage/emulated/0/Android/helpup/`，单文件 2MB 轮转，保留 2 份；
+  - 分区存储写不进去时自动降级，App 底部实时显示**当前实际目录**并给一键授权入口；
+  - 同时镜像 logcat，`adb logcat -s WOILAI_PERF` 照旧可用。
+- 全局 `UncaughtExceptionHandler`：崩溃带机型/ABI 写进 `app.log` 后再交还系统。
+- `core:asr` / `core:ocr` / App 的日志调用全部改走 `LogHub`，不再散落 `android.util.Log`。
+- `docs/LOGGING.md`：目录说明、授权命令、`adb pull` 两种路径。
+
+### 说明
+- Android 11+ 直接写 `/Android/helpup` 需要「所有文件访问权限」（MANAGE_EXTERNAL_STORAGE）；
+  没授权时日志落到 `Android/data/<包名>/files/logs`，adb 可直接 pull，不影响调试。
+
 ## v0.3.0-m2（2026-11-13）
 
 真正接上 sherpa-onnx。

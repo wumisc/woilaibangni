@@ -20,5 +20,6 @@ kotlin {
 dependencies {
     implementation(project(":core:audio"))
     implementation(project(":core:model"))
+    implementation(project(":core:log"))
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
 }

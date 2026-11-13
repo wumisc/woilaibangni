@@ -1,6 +1,6 @@
 package io.github.wumisc.woilaibangni.core.asr
 
-import android.util.Log
+import io.github.wumisc.woilaibangni.core.log.LogHub
 import com.k2fsa.sherpa.onnx.FeatureConfig
 import com.k2fsa.sherpa.onnx.OnlineModelConfig
 import com.k2fsa.sherpa.onnx.OnlineRecognizer
@@ -36,7 +36,7 @@ class SherpaStreamingAsrEngine(private val threads: Int = 2) : StreamingAsrEngin
         val joiner = File(modelDir, "joiner.onnx")
         val tokens = File(modelDir, "tokens.txt")
         if (!encoder.isFile || !decoder.isFile || !joiner.isFile || !tokens.isFile) {
-            Log.w(TAG, "流式模型不完整：$modelDir")
+            LogHub.asr(TAG, "流式模型不完整：$modelDir")
             return@withContext false
         }
 
@@ -60,10 +60,10 @@ class SherpaStreamingAsrEngine(private val threads: Int = 2) : StreamingAsrEngin
             recognizer = rec
             stream = rec.createStream()
             isReady = true
-            Log.i(TAG, "流式识别已加载 threads=$threads")
+            LogHub.asr(TAG, "流式识别已加载 threads=$threads")
             true
         }.getOrElse {
-            Log.e(TAG, "流式识别初始化失败", it)
+            LogHub.error(LogHub.Channel.ASR, TAG, "流式识别初始化失败", it)
             isReady = false
             false
         }
@@ -89,7 +89,7 @@ class SherpaStreamingAsrEngine(private val threads: Int = 2) : StreamingAsrEngin
             stream = rec.createStream()
             text
         }.getOrElse {
-            Log.e(TAG, "定稿失败", it)
+            LogHub.error(LogHub.Channel.ASR, TAG, "定稿失败", it)
             ""
         }
     }
