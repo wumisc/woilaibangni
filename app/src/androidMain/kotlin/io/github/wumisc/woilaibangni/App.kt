@@ -191,15 +191,26 @@ fun App() {
         var readText by remember { mutableStateOf("") }
         var readHint by remember { mutableStateOf<String?>(null) }
         var logDir by remember { mutableStateOf("") }
+        var modelStatus by remember { mutableStateOf("") }
 
         LaunchedEffect(Unit) {
             logDir = LogHub.rootPath
             // full 包：首次启动把内置模型解包到私有目录（约 210MB，一次性）
-            if (BundledModels.hasBundled(context)) {
+            val modelsDir = File(context.filesDir, "models")
+            val bundled = BundledModels.hasBundled(context)
+            if (bundled) {
                 setupHint = "正在安装内置模型 0%"
-                BundledModels.install(context) { pct -> setupHint = "正在安装内置模型 $pct%" }
+                var ok = BundledModels.install(context, modelsDir) { pct -> setupHint = "正在安装内置模型 $pct%" }
+                if (!ok) {
+                    // 上次可能被中途杀掉留下半包，强制重来一次
+                    ok = BundledModels.install(context, modelsDir, force = true) { pct ->
+                        setupHint = "正在重装模型 $pct%"
+                    }
+                }
                 setupHint = null
+                if (!ok) setupHint = "内置模型解包失败，详见 app.log"
             }
+            modelStatus = if (bundled) BundledModels.describe(modelsDir) else "slim 包：未内置模型"
             runCatching {
                 ocrReader.prepare(File(context.filesDir, "models/ocr").absolutePath)
             }
@@ -296,6 +307,7 @@ fun App() {
                 asrState = asrState,
                 readText = readText,
                 readHint = readHint,
+                modelStatus = modelStatus,
                 logDir = logDir,
                 onRefreshLog = {
                     LogHub.init(context)
@@ -338,6 +350,7 @@ private fun Content(
     asrState: AsrSession.UiState,
     readText: String,
     readHint: String?,
+    modelStatus: String,
     logDir: String,
     onRefreshLog: () -> Unit,
     onToggleMic: () -> Unit,
@@ -364,6 +377,10 @@ private fun Content(
         setupHint?.let {
             BasicText(text = it, style = TextStyle(fontSize = 15.sp, color = palette.accent))
             Spacer(Modifier.height(12.dp))
+        }
+        if (modelStatus.isNotBlank()) {
+            BasicText(text = "模型：$modelStatus", style = TextStyle(fontSize = 12.sp, color = palette.hint))
+            Spacer(Modifier.height(10.dp))
         }
 
         when (mode.title) {

@@ -32,12 +32,14 @@ object BundledModels {
     suspend fun install(
         context: Context,
         targetRoot: File = File(context.filesDir, ASSET_ROOT),
+        force: Boolean = false,
         onProgress: (Int) -> Unit = {},
     ): Boolean = withContext(Dispatchers.IO) {
         runCatching {
             if (!hasBundled(context)) return@runCatching false
             val stamp = File(targetRoot, STAMP)
-            if (stamp.exists()) return@runCatching true
+            if (stamp.exists() && !force) return@runCatching true
+            if (force) stamp.delete()
 
             val entries = mutableListOf<Pair<String, Long>>()
             collect(context.assets, ASSET_ROOT, entries)
@@ -59,14 +61,42 @@ object BundledModels {
                     onProgress(pct)
                 }
             }
+            // 校验：别让半包当成成功
+            val missing = REQUIRED.filterNot { File(targetRoot, it).let { f -> f.isFile && f.length() > 0 } }
+            if (missing.isNotEmpty()) {
+                stamp.delete()
+                LogHub.app("WOILAI_LOG", "内置模型解包不完整，缺：${missing.joinToString()}")
+                LogHub.asr("WOILAI_ASR", "内置模型解包不完整，缺：${missing.joinToString()}")
+                return@runCatching false
+            }
             stamp.writeText(System.currentTimeMillis().toString())
             LogHub.app("WOILAI_LOG", "内置模型已解包：${targetRoot.absolutePath}")
+            LogHub.asr("WOILAI_ASR", "内置模型已解包：${targetRoot.absolutePath}")
             true
         }.getOrElse { e ->
             LogHub.error(LogHub.Channel.APP, "WOILAI_LOG", "内置模型解包失败", e)
             false
         }
     }
+
+    /** 模型文件现状，直接显示给用户，不用去翻日志。 */
+    fun describe(targetRoot: File): String {
+        val items = REQUIRED.map { rel ->
+            val f = File(targetRoot, rel)
+            if (f.isFile && f.length() > 0) "$rel ${f.length() / 1024 / 1024}MB" else "$rel 缺失"
+        }
+        return items.joinToString(" · ")
+    }
+
+    val REQUIRED = listOf(
+        "asr-stream/encoder.onnx",
+        "asr-stream/decoder.onnx",
+        "asr-stream/joiner.onnx",
+        "asr-stream/tokens.txt",
+        "ocr/det.onnx",
+        "ocr/rec.onnx",
+        "ocr/ppocr_keys_v1.txt",
+    )
 
     private fun collect(assets: AssetManager, path: String, out: MutableList<Pair<String, Long>>) {
         val children = runCatching { assets.list(path) }.getOrNull() ?: return
