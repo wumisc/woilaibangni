@@ -45,7 +45,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import io.github.wumisc.woilaibangni.core.asr.AsrSession
-import io.github.wumisc.woilaibangni.core.asr.DemoAsrEngine
+import io.github.wumisc.woilaibangni.core.asr.SherpaStreamingAsrEngine
 import io.github.wumisc.woilaibangni.core.asr.SherpaOfflineAsrEngine
 import io.github.wumisc.woilaibangni.core.asr.TwoPassAsrEngine
 import io.github.wumisc.woilaibangni.core.aac.BoardDefaults
@@ -124,14 +124,22 @@ fun App() {
         val scope = rememberCoroutineScope()
 
         val asr = remember {
-            AsrSession(engine = TwoPassAsrEngine(DemoAsrEngine(), SherpaOfflineAsrEngine()))
+            AsrSession(
+                engine = TwoPassAsrEngine(SherpaStreamingAsrEngine(), SherpaOfflineAsrEngine()),
+            )
         }
         val speaker = remember { AndroidTextSpeaker(context) }
         val ocrReader = remember { PpOcrTextReader() }
         val reading = remember { ReadingPipeline(ocrReader) }
         val deck = remember { BoardDefaults.deck() }
+        var engineReady by remember { mutableStateOf(false) }
         LaunchedEffect(Unit) {
             ocrReader.prepare(File(context.filesDir, "models/ocr").absolutePath)
+            val models = File(context.filesDir, "models")
+            engineReady = asr.prepare(
+                File(models, "asr-stream").absolutePath,
+                File(models, "asr-accurate").absolutePath,
+            )
         }
         DisposableEffect(Unit) {
             onDispose {
@@ -165,6 +173,7 @@ fun App() {
             Content(
                 mode = modes[selected],
                 deck = deck,
+                engineReady = engineReady,
                 asrState = asrState,
                 readText = readText,
                 onToggleMic = {
@@ -191,6 +200,7 @@ fun App() {
 private fun Content(
     mode: Mode,
     deck: io.github.wumisc.woilaibangni.core.aac.AacDeck,
+    engineReady: Boolean,
     asrState: AsrSession.UiState,
     readText: String,
     onToggleMic: () -> Unit,
@@ -215,7 +225,7 @@ private fun Content(
         Spacer(Modifier.height(20.dp))
 
         when (mode.title) {
-            "面对面", "只听" -> LiveCaptionCard(asrState, onToggleMic)
+            "面对面", "只听" -> LiveCaptionCard(asrState, engineReady, onToggleMic)
             "看世界" -> ReadCard(readText, onCapture, onSpeak)
             "短句板" -> BoardScreen(deck = deck, onSpeak = onSpeak)
             else -> Unit
@@ -245,7 +255,7 @@ private fun Content(
 }
 
 @Composable
-private fun LiveCaptionCard(state: AsrSession.UiState, onToggleMic: () -> Unit) {
+private fun LiveCaptionCard(state: AsrSession.UiState, ready: Boolean, onToggleMic: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -254,6 +264,7 @@ private fun LiveCaptionCard(state: AsrSession.UiState, onToggleMic: () -> Unit) 
     ) {
         BasicText(
             text = when {
+                !ready -> "还没有对话包。把流式模型放进 files/models/asr-stream（encoder/decoder/joiner/tokens）再重启。"
                 state.error != null -> state.error!!
                 state.partial.isNotBlank() -> state.partial
                 state.committed.isNotBlank() -> state.committed
@@ -280,11 +291,11 @@ private fun LiveCaptionCard(state: AsrSession.UiState, onToggleMic: () -> Unit) 
                     RoundedCornerShape(14.dp),
                 )
                 .semantics { contentDescription = if (state.listening) "停止录音" else "开始录音" }
-                .clickable(onClick = onToggleMic),
+                .clickable(enabled = ready, onClick = onToggleMic),
             contentAlignment = Alignment.Center,
         ) {
             BasicText(
-                text = if (state.listening) "停止" else "开始对话",
+                text = if (!ready) "未就绪" else if (state.listening) "停止" else "开始对话",
                 style = TextStyle(fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White),
             )
         }

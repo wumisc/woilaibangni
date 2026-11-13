@@ -43,8 +43,8 @@ android {
         applicationId = "io.github.wumisc.woilaibangni"
         minSdk = 26
         targetSdk = 37
-        versionCode = 2
-        versionName = "0.2.0-m1"
+        versionCode = 3
+        versionName = "0.3.0-m2"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
 
@@ -61,5 +61,8 @@ android {
 
     packaging {
         resources.excludes += setOf("META-INF/AL2.0", "META-INF/LGPL2.1")
+        // sherpa-onnx 的预编译包与 onnxruntime-android AAR 都带 libonnxruntime.so，
+        // 两者版本已对齐（1.28.2），保留任意一份即可
+        jniLibs.pickFirsts += setOf("**/libonnxruntime.so")
     }
 }

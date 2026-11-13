@@ -1,5 +1,25 @@
 # 更新日志
 
+## v0.3.0-m2（2026-11-13）
+
+真正接上 sherpa-onnx。
+
+### 新增
+- **`SherpaStreamingAsrEngine`**：streaming zipformer transducer，第一遍实时出字。
+  - 关闭 sherpa 自带 endpoint，断句仍由我们的能量 VAD 负责，避免两套端点打架。
+- **`SherpaOfflineAsrEngine`**：SenseVoice（language=auto）+ 逆文本规整，第二遍定稿。
+- **sherpa-onnx v2.0.1 官方 arm64 原生库**进入 `core/asr/src/main/jniLibs`；
+  Kotlin API 从官方 `kotlin-api` 取来，包名保持 `com.k2fsa.sherpa.onnx`，便于对照上游修 bug。
+- `AsrSession.prepare(streamDir, offlineDir)`：两个包独立准备，缺一个只降级不罢工。
+- UI 增加「未就绪」态：模型没放对时按钮禁用并给出路径提示，而不是假装在听。
+
+### 构建
+- ONNX Runtime 对齐到 1.28.0（sherpa 包内 1.28.2），`jniLibs.pickFirsts` 只保留一份 `libonnxruntime.so`。
+- APK 41MB（arm64，两个引擎的原生库都在）。
+
+### 已知限制
+- 未在真机跑过推理（云主机无设备）；ORT 版本差异可能导致符号缺失，见 `docs/STATUS-M2.md`。
+
 ## v0.2.0-m1（2026-11-13）
 
 三条线同时推进：真实 OCR、两遍识别、OBF/OBZ 短句板。

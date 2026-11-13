@@ -56,6 +56,10 @@ class AsrSession(
     private val utteranceChunks = ArrayList<ShortArray>()
     private var utteranceSamples = 0
 
+    /** 两个模型包分别准备；只装对话包也能用。 */
+    suspend fun prepare(streamDir: String, offlineDir: String): Boolean =
+        (engine as? TwoPassAsrEngine)?.prepare(streamDir, offlineDir) ?: engine.prepare(streamDir)
+
     fun start(): Boolean {
         if (_state.value.listening) return true
         val ok = recorder.start { frame -> onFrame(frame) }

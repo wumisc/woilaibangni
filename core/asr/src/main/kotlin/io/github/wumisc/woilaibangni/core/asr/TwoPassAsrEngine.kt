@@ -1,6 +1,14 @@
 package io.github.wumisc.woilaibangni.core.asr
 
 import android.util.Log
+import com.k2fsa.sherpa.onnx.FeatureConfig
+import com.k2fsa.sherpa.onnx.OfflineModelConfig
+import com.k2fsa.sherpa.onnx.OfflineRecognizer
+import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
+import com.k2fsa.sherpa.onnx.OfflineSenseVoiceModelConfig
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.File
 
 /**
  * 非流式高精度识别引擎（第二遍）。
@@ -35,10 +43,15 @@ class TwoPassAsrEngine(
     var offlineReady: Boolean = false
         private set
 
-    override suspend fun prepare(modelDir: String): Boolean {
-        // 允许只装实时包：第二遍装不上就退化为单遍，不影响可用性
-        val first = streaming.prepare(modelDir)
-        offlineReady = runCatching { offline.prepare(modelDir) }.getOrDefault(false)
+    override suspend fun prepare(modelDir: String): Boolean = prepare(modelDir, modelDir)
+
+    /**
+     * 两个包分开准备：对话包（80MB 流式）和高精度包（230MB SenseVoice）是独立下载的，
+     * 只装前者也能用，只是少了句末校正。
+     */
+    suspend fun prepare(streamDir: String, offlineDir: String): Boolean {
+        val first = runCatching { streaming.prepare(streamDir) }.getOrDefault(false)
+        offlineReady = runCatching { offline.prepare(offlineDir) }.getOrDefault(false)
         Log.i(TAG, "prepare stream=$first offline=$offlineReady")
         return first
     }
@@ -69,27 +82,71 @@ class TwoPassAsrEngine(
  * 现状：AAR 不在 Maven Central，需要把 `sherpa-onnx-jni` 的 .so 放进 `jniLibs`。
  * 本类在库缺失时静默降级为「不可用」，不会让 App 崩，也不会假装识别成功。
  */
-class SherpaOfflineAsrEngine : OfflineAsrEngine {
+class SherpaOfflineAsrEngine(private val threads: Int = 2) : OfflineAsrEngine {
 
-    private var nativeLoaded = false
+    private var recognizer: OfflineRecognizer? = null
     private var modelReady = false
 
-    override val isReady: Boolean get() = nativeLoaded && modelReady
+    override val isReady: Boolean get() = modelReady
 
-    override suspend fun prepare(modelDir: String): Boolean {
-        nativeLoaded = runCatching { System.loadLibrary("sherpa-onnx-jni") }.isSuccess
-        if (!nativeLoaded) {
-            Log.i(TAG, "sherpa-onnx-jni 未打包，第二遍识别暂不可用")
-            return false
+    override suspend fun prepare(modelDir: String): Boolean = withContext(Dispatchers.IO) {
+        if (modelReady) return@withContext true
+        val model = listOf("model.onnx", "sensevoice.onnx", "model.int8.onnx")
+            .map { File(modelDir, it) }
+            .firstOrNull { it.isFile }
+        val tokens = File(modelDir, "tokens.txt")
+        if (model == null || !tokens.isFile) {
+            Log.w(TAG, "高精度模型不完整：$modelDir")
+            return@withContext false
         }
-        modelReady = false
-        Log.i(TAG, "native 已加载，模型目录=$modelDir")
-        return modelReady
+
+        runCatching {
+            val config = OfflineRecognizerConfig(
+                featConfig = FeatureConfig(sampleRate = 16000, featureDim = 80),
+                modelConfig = OfflineModelConfig(
+                    senseVoice = OfflineSenseVoiceModelConfig(
+                        model = model.absolutePath,
+                        language = "auto",
+                        useInverseTextNormalization = true,
+                    ),
+                    tokens = tokens.absolutePath,
+                    numThreads = threads,
+                    modelType = "sensevoice",
+                ),
+                decodingMethod = "greedy_search",
+            )
+            recognizer = OfflineRecognizer(config = config)
+            modelReady = true
+            Log.i(TAG, "高精度识别已加载 model=${model.name}")
+            true
+        }.getOrElse {
+            Log.e(TAG, "高精度识别初始化失败", it)
+            modelReady = false
+            false
+        }
     }
 
-    override suspend fun transcribe(samples: ShortArray, sampleRate: Int): String? = null
+    override suspend fun transcribe(samples: ShortArray, sampleRate: Int): String? = withContext(Dispatchers.Default) {
+        val rec = recognizer ?: return@withContext null
+        if (samples.isEmpty()) return@withContext null
+        runCatching {
+            val stream = rec.createStream()
+            try {
+                stream.acceptWaveform(samples.toFloatArray(), sampleRate)
+                rec.decode(stream)
+                rec.getResult(stream).text.trim().ifBlank { null }
+            } finally {
+                stream.release()
+            }
+        }.getOrElse {
+            Log.e(TAG, "第二遍识别失败", it)
+            null
+        }
+    }
 
     override fun release() {
+        runCatching { recognizer?.release() }
+        recognizer = null
         modelReady = false
     }
 
@@ -104,4 +161,10 @@ class NoopOfflineAsrEngine : OfflineAsrEngine {
     override suspend fun prepare(modelDir: String): Boolean = false
     override suspend fun transcribe(samples: ShortArray, sampleRate: Int): String? = null
     override fun release() = Unit
+}
+
+private fun ShortArray.toFloatArray(): FloatArray {
+    val out = FloatArray(size)
+    for (i in out.indices) out[i] = this[i] / 32768f
+    return out
 }

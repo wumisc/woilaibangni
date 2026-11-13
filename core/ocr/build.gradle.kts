@@ -20,5 +20,5 @@ kotlin {
 dependencies {
     implementation(project(":core:model"))
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
-    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.20.0")
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.28.0")
 }
