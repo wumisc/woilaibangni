@@ -1,5 +1,24 @@
 # 更新日志
 
+## v0.5.0-m6（2026-11-13）
+
+首次出现两种发行包。
+
+| 包 | 体积 | 模型 |
+|---|---|---|
+| `slim` | 41MB | 不含模型，按需下载 / adb push |
+| `full` | 227MB | 内置标准 zipformer（int8）+ PP-OCRv5 mobile，装完即用 |
+
+### 新增
+- `productFlavors`：`slim` / `full`，差异只在 assets，代码不变。
+- `BundledModels`：full 包首启把 `assets/models`（约 210MB）解包到 `filesDir/models`，
+  带百分比进度提示；OCR 因为 ONNX Runtime 只吃文件路径，必须走这一步。
+- `tools/fetch-models.sh`：仓库不存模型（encoder 174MB 超 GitHub 单文件限制），需要重建时跑它。
+
+### 说明
+- full 包保留 INTERNET 权限（按用户决定），但运行时不联网。
+- 模型来源：k2-fsa/sherpa-onnx release `asr-models`；PP-OCRv5 mobile ONNX 取自 HF `ogkalu/ppocr-v5-onnx`。
+
 ## v0.4.2-m5（2026-11-13）
 
 启动不再碰原生库。

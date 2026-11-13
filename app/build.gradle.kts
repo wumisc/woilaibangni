@@ -44,14 +44,28 @@ android {
         applicationId = "io.github.wumisc.woilaibangni"
         minSdk = 26
         targetSdk = 37
-        versionCode = 6
-        versionName = "0.4.2-m5"
+        versionCode = 7
+        versionName = "0.5.0-m6"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_21
         targetCompatibility = JavaVersion.VERSION_21
+    }
+
+    // 两种发行形态：slim 走按需下载模型；full 把标准 zipformer + PP-OCRv5 内置进 APK。
+    // 差异只在 assets，代码里通过 BundledModels.hasBundled() 自动判断。
+    flavorDimensions += "dist"
+    productFlavors {
+        create("slim") {
+            dimension = "dist"
+            versionNameSuffix = ""
+        }
+        create("full") {
+            dimension = "dist"
+            versionNameSuffix = "-full"
+        }
     }
 
     buildTypes {

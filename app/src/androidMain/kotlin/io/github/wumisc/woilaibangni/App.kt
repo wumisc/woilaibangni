@@ -140,7 +140,14 @@ fun App() {
         val reading = remember { ReadingPipeline(ocrReader) }
         val deck = remember { BoardDefaults.deck() }
         var engineReady by remember { mutableStateOf(false) }
+        var setupHint by remember { mutableStateOf<String?>(null) }
         LaunchedEffect(Unit) {
+            // full 包：首次启动把内置模型解包到私有目录（约 210MB，一次性）
+            if (BundledModels.hasBundled(context)) {
+                setupHint = "正在安装内置模型 0%"
+                BundledModels.install(context) { pct -> setupHint = "正在安装内置模型 $pct%" }
+                setupHint = null
+            }
             // 启动阶段不碰任何原生库：模型缺失时 prepare 会在查文件后直接返回 false
             runCatching {
                 ocrReader.prepare(File(context.filesDir, "models/ocr").absolutePath)
@@ -186,6 +193,7 @@ fun App() {
                 mode = modes[selected],
                 deck = deck,
                 engineReady = engineReady,
+                setupHint = setupHint,
                 asrState = asrState,
                 readText = readText,
                 onToggleMic = {
@@ -213,6 +221,7 @@ private fun Content(
     mode: Mode,
     deck: io.github.wumisc.woilaibangni.core.aac.AacDeck,
     engineReady: Boolean,
+    setupHint: String?,
     asrState: AsrSession.UiState,
     readText: String,
     onToggleMic: () -> Unit,
@@ -254,6 +263,10 @@ private fun Content(
             ) {
                 BasicText(text = line, style = TextStyle(fontSize = 17.sp, color = Color(0xFF1F2430)))
             }
+        }
+        setupHint?.let {
+            Spacer(Modifier.height(12.dp))
+            BasicText(text = it, style = TextStyle(fontSize = 15.sp, color = Color(0xFF0A6CFF)))
         }
         Spacer(Modifier.height(20.dp))
         BasicText(
