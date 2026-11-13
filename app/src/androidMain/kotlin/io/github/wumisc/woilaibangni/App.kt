@@ -127,7 +127,7 @@ private val modes = listOf(
 fun App() {
     MiuixTheme {
         val context = LocalContext.current
-        remember { LogHub.init(context); true }
+        remember { runCatching { LogHub.init(context) }; true }
         val scope = rememberCoroutineScope()
 
         val asr = remember {

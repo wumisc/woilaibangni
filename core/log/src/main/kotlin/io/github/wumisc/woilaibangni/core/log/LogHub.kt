@@ -57,6 +57,10 @@ object LogHub {
     private var dir: File? = null
 
     fun init(context: Context) {
+        runCatching { initInternal(context) }
+    }
+
+    private fun initInternal(context: Context) {
         synchronized(lock) {
             // 已经落在目标目录且没降级，不用重复初始化；
             // 降级状态每次调用都重试，用户刚授完权就能升级到目标目录
