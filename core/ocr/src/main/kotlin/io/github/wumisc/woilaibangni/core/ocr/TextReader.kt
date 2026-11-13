@@ -1,6 +1,9 @@
 package io.github.wumisc.woilaibangni.core.ocr
 
 import android.graphics.Bitmap
+import android.util.Log
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /** 一行文字及其位置；位置用于"按阅读顺序朗读"和"只读某个区域"。 */
 data class OcrLine(
@@ -62,23 +65,43 @@ object LineGrouper {
 }
 
 /**
- * PP-OCRv5 mobile（det + rec，int8）实现占位。
+ * PP-OCRv5 mobile（det + rec，int8）+ ONNX Runtime 的真实实现。
  *
- * 接入方式（M0 待办）：
- * 1. 依赖 `com.microsoft.onnxruntime:onnxruntime-android`；
- * 2. det 模型输出文本框，做 DB 后处理得到四点框；
- * 3. rec 模型按框裁剪、归一化后识别，charset 从 zip 内 dict.txt 读取；
- * 4. 全部在 IO 线程，单页 1080p 目标 ≤ 800ms。
+ * 行为约定：
+ * - 模型缺失时 [isReady] 为 false，[read] 返回空列表而不是抛异常 ——
+ *   视障用户拍了一张照片却崩掉 App，比"读不出来"更糟。
+ * - 置信度低于阈值的行直接丢弃：宁可漏读，也不要念错药名。
  */
-class PpOcrTextReader : TextReader {
-    override val isReady: Boolean = false
+class PpOcrTextReader(private val minConfidence: Float = 0.5f) : TextReader {
 
-    override suspend fun prepare(modelDir: String): Boolean = false
+    private var engine: PpOcrEngine? = null
 
-    override suspend fun read(bitmap: Bitmap): List<OcrLine> =
-        error("PP-OCRv5 尚未接入，M0 完成后启用")
+    override val isReady: Boolean get() = engine?.isReady == true
 
-    override fun release() = Unit
+    override suspend fun prepare(modelDir: String): Boolean = withContext(Dispatchers.IO) {
+        val e = engine ?: PpOcrEngine(modelDir).also { engine = it }
+        e.load()
+    }
+
+    override suspend fun read(bitmap: Bitmap): List<OcrLine> = withContext(Dispatchers.Default) {
+        val e = engine ?: return@withContext emptyList()
+        if (!e.isReady) return@withContext emptyList()
+
+        val boxList = e.detect(bitmap)
+        Log.d("WOILAI_OCR", "det boxes=${boxList.size} size=${bitmap.width}x${bitmap.height}")
+
+        boxList.mapNotNull { box ->
+            val decoded = e.recognize(bitmap, box) ?: return@mapNotNull null
+            val text = decoded.text.trim()
+            if (text.isEmpty() || decoded.confidence < minConfidence) return@mapNotNull null
+            OcrLine(text, box.left, box.top, box.right, box.bottom)
+        }.sortedWith(compareBy({ (it.top + it.bottom) / 2 }, { it.left }))
+    }
+
+    override fun release() {
+        engine?.close()
+        engine = null
+    }
 }
 
 /** 链路自检用：返回固定文案，验证"识别→分段→朗读"通路。 */

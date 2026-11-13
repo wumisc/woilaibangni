@@ -21,6 +21,7 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -44,9 +45,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import io.github.wumisc.woilaibangni.core.asr.AsrSession
-import io.github.wumisc.woilaibangni.core.ocr.DemoTextReader
+import io.github.wumisc.woilaibangni.core.asr.DemoAsrEngine
+import io.github.wumisc.woilaibangni.core.asr.SherpaOfflineAsrEngine
+import io.github.wumisc.woilaibangni.core.asr.TwoPassAsrEngine
+import io.github.wumisc.woilaibangni.core.aac.BoardDefaults
+import io.github.wumisc.woilaibangni.core.ocr.PpOcrTextReader
 import io.github.wumisc.woilaibangni.core.ocr.ReadingPipeline
 import io.github.wumisc.woilaibangni.core.tts.AndroidTextSpeaker
+import java.io.File
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -117,9 +123,16 @@ fun App() {
         val context = LocalContext.current
         val scope = rememberCoroutineScope()
 
-        val asr = remember { AsrSession() }
+        val asr = remember {
+            AsrSession(engine = TwoPassAsrEngine(DemoAsrEngine(), SherpaOfflineAsrEngine()))
+        }
         val speaker = remember { AndroidTextSpeaker(context) }
-        val reading = remember { ReadingPipeline(DemoTextReader()) }
+        val ocrReader = remember { PpOcrTextReader() }
+        val reading = remember { ReadingPipeline(ocrReader) }
+        val deck = remember { BoardDefaults.deck() }
+        LaunchedEffect(Unit) {
+            ocrReader.prepare(File(context.filesDir, "models/ocr").absolutePath)
+        }
         DisposableEffect(Unit) {
             onDispose {
                 asr.release()
@@ -151,6 +164,7 @@ fun App() {
         Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF7F8FA))) {
             Content(
                 mode = modes[selected],
+                deck = deck,
                 asrState = asrState,
                 readText = readText,
                 onToggleMic = {
@@ -176,6 +190,7 @@ fun App() {
 @Composable
 private fun Content(
     mode: Mode,
+    deck: io.github.wumisc.woilaibangni.core.aac.AacDeck,
     asrState: AsrSession.UiState,
     readText: String,
     onToggleMic: () -> Unit,
@@ -202,6 +217,7 @@ private fun Content(
         when (mode.title) {
             "面对面", "只听" -> LiveCaptionCard(asrState, onToggleMic)
             "看世界" -> ReadCard(readText, onCapture, onSpeak)
+            "短句板" -> BoardScreen(deck = deck, onSpeak = onSpeak)
             else -> Unit
         }
 

@@ -3,16 +3,24 @@ package io.github.wumisc.woilaibangni.core.asr
 import android.os.SystemClock
 import android.util.Log
 import io.github.wumisc.woilaibangni.core.audio.PcmRecorder
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 import kotlin.math.sqrt
 
 /**
- * 一次「对话会话」：录音 → 能量 VAD 断句 → 识别引擎 → 字幕状态。
+ * 一次「对话会话」：录音 → 能量 VAD 断句 → 两遍识别 → 字幕状态。
  *
- * 说明：
- * - 这里用的是最朴素的能量 VAD，先跑通时序；M0 后期换成 silero VAD（sherpa-onnx 内置）。
- * - 所有延迟打点都在本类内完成，UI 只读 [state]，不在界面里算时间。
+ * 两遍策略：
+ * - 说话过程中只用流式引擎出中间结果（不碰第二遍，避免抢占 CPU）；
+ * - 静音 600ms 判定一句结束，先拿流式定稿**立刻上屏**；
+ * - 同时在后台把整句 PCM 交给 [OfflineAsrEngine] 重跑，成功后替换文案并标记 `revised`。
+ *
+ * 所有延迟打点都在本类内完成，UI 只读 [state]。
  */
 class AsrSession(
     private val recorder: PcmRecorder = PcmRecorder(),
@@ -27,6 +35,8 @@ class AsrSession(
         val partial: String = "",
         val committed: String = "",
         val error: String? = null,
+        /** 定稿是否已被第二遍识别替换过。 */
+        val revised: Boolean = false,
         /** VAD 判定说话开始 → 第一个中间结果上屏的毫秒数。 */
         val firstPartialLatencyMs: Long? = null,
         /** VAD 判定说话结束 → 定稿回填的毫秒数。 */
@@ -36,10 +46,15 @@ class AsrSession(
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state
 
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
     private var lastVoiceAt = 0L
     private var utteranceStartedAt = 0L
     private var firstPartialLogged = false
-    private val pcm = StringBuilder()
+
+    /** 当前这句的 PCM，供第二遍识别使用；按块累积，避免整段复制。 */
+    private val utteranceChunks = ArrayList<ShortArray>()
+    private var utteranceSamples = 0
 
     fun start(): Boolean {
         if (_state.value.listening) return true
@@ -55,6 +70,7 @@ class AsrSession(
 
     fun release() {
         stop()
+        scope.cancel()
         engine.release()
     }
 
@@ -67,9 +83,12 @@ class AsrSession(
             if (!_state.value.speaking) {
                 utteranceStartedAt = now
                 firstPartialLogged = false
-                pcm.clear()
-                _state.value = _state.value.copy(speaking = true, partial = "")
+                utteranceChunks.clear()
+                utteranceSamples = 0
+                _state.value = _state.value.copy(speaking = true, partial = "", revised = false)
             }
+            appendAudio(frame)
+
             engine.feed(frame, SAMPLE_RATE) { partial ->
                 if (partial.isNotBlank()) {
                     val latency = if (!firstPartialLogged) now - utteranceStartedAt else null
@@ -84,20 +103,57 @@ class AsrSession(
         } else if (_state.value.speaking && now - lastVoiceAt > silenceHoldMs) {
             val finalStart = now
             val text = engine.finishUtterance()
+            val captured = buildUtterance()
+
             if (text.isNotBlank()) {
-                pcm.append(text)
                 val finalizeMs = SystemClock.elapsedRealtime() - finalStart
                 Log.i(PERF_TAG, "finalize_ms=$finalizeMs chars=${text.length}")
                 _state.value = _state.value.copy(
                     speaking = false,
                     partial = "",
                     committed = text,
+                    revised = false,
                     finalizeLatencyMs = finalizeMs,
                 )
+                refineAsync(text, captured)
             } else {
                 _state.value = _state.value.copy(speaking = false, partial = "")
             }
         }
+    }
+
+    /** 第二遍识别：成功且与第一遍不同才替换，避免把好结果改坏。 */
+    private fun refineAsync(firstPass: String, captured: ShortArray) {
+        if (captured.isEmpty()) return
+        scope.launch {
+            val started = SystemClock.elapsedRealtime()
+            val better = runCatching { engine.correct(captured, SAMPLE_RATE) }.getOrNull()
+            if (better.isNullOrBlank()) return@launch
+            if (better == firstPass) return@launch
+            // 只在用户还没开始下一句时替换，否则会把新字幕冲掉
+            val current = _state.value
+            if (current.committed != firstPass || current.speaking) return@launch
+            val cost = SystemClock.elapsedRealtime() - started
+            Log.i(PERF_TAG, "revise_ms=$cost chars=${better.length}")
+            _state.value = current.copy(committed = better, revised = true)
+        }
+    }
+
+    private fun appendAudio(frame: ShortArray) {
+        if (utteranceSamples + frame.size > MAX_UTTERANCE_SAMPLES) return
+        utteranceChunks += frame.copyOf()
+        utteranceSamples += frame.size
+    }
+
+    private fun buildUtterance(): ShortArray {
+        if (utteranceSamples == 0) return ShortArray(0)
+        val out = ShortArray(utteranceSamples)
+        var offset = 0
+        for (chunk in utteranceChunks) {
+            chunk.copyInto(out, offset, 0, minOf(chunk.size, utteranceSamples - offset))
+            offset += chunk.size
+        }
+        return out
     }
 
     private fun rms(frame: ShortArray): Float {
@@ -113,5 +169,8 @@ class AsrSession(
     companion object {
         const val SAMPLE_RATE = 16_000
         const val PERF_TAG = "WOILAI_PERF"
+
+        /** 单句上限 60 秒，防止 VAD 失效时把内存吃满。 */
+        private const val MAX_UTTERANCE_SAMPLES = SAMPLE_RATE * 60
     }
 }

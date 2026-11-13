@@ -18,6 +18,12 @@ interface StreamingAsrEngine {
 
     fun finishUtterance(): String
 
+    /**
+     * 两遍识别的第二遍：把整句 PCM 交给高精度引擎重新识别。
+     * 返回 null 表示没有校正（引擎不可用或结果为空），调用方应保留第一遍结果。
+     */
+    suspend fun correct(samples: ShortArray, sampleRate: Int): String? = null
+
     fun release()
 }
 
