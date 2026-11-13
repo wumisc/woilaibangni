@@ -29,7 +29,6 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -191,8 +190,10 @@ fun App() {
         var notReadyReason by remember { mutableStateOf<String?>(null) }
         var readText by remember { mutableStateOf("") }
         var readHint by remember { mutableStateOf<String?>(null) }
+        var logDir by remember { mutableStateOf("") }
 
         LaunchedEffect(Unit) {
+            logDir = LogHub.rootPath
             // full 包：首次启动把内置模型解包到私有目录（约 210MB，一次性）
             if (BundledModels.hasBundled(context)) {
                 setupHint = "正在安装内置模型 0%"
@@ -210,8 +211,14 @@ fun App() {
                 )
                 if (!engineReady) {
                     val dir = File(models, "asr-stream")
+                    val bundled = BundledModels.hasBundled(context)
                     notReadyReason = streaming.lastError
-                        ?: "模型文件不完整：$dir（需要 encoder/decoder/joiner/tokens）"
+                        ?: if (!bundled) {
+                            "这是轻量包（slim），没有内置模型。请安装 full 包（227MB），" +
+                                "或把 encoder/decoder/joiner/tokens 放进 $dir"
+                        } else {
+                            "模型文件不完整：$dir（解包可能失败了，看 app.log）"
+                        }
                     LogHub.asr("WOILAI_ASR", "not ready: $notReadyReason")
                 }
             }.onFailure {
@@ -289,6 +296,11 @@ fun App() {
                 asrState = asrState,
                 readText = readText,
                 readHint = readHint,
+                logDir = logDir,
+                onRefreshLog = {
+                    LogHub.init(context)
+                    logDir = LogHub.rootPath
+                },
                 onToggleMic = {
                     if (asrState.listening) {
                         asr.stop()
@@ -326,6 +338,8 @@ private fun Content(
     asrState: AsrSession.UiState,
     readText: String,
     readHint: String?,
+    logDir: String,
+    onRefreshLog: () -> Unit,
     onToggleMic: () -> Unit,
     onCapture: () -> Unit,
     onSpeak: (String) -> Unit,
@@ -361,6 +375,14 @@ private fun Content(
                 onToggleMic = onToggleMic,
             )
             "看世界" -> ReadCard(readText, readHint, palette, onCapture, onSpeak)
+            "语音输入" -> VoiceInputCard(
+                state = asrState,
+                ready = engineReady,
+                notReadyReason = notReadyReason,
+                palette = palette,
+                onToggleMic = onToggleMic,
+                onSpeak = onSpeak,
+            )
             "短句板" -> BoardScreen(deck = deck, palette = palette, onSpeak = onSpeak)
             else -> Unit
         }
@@ -378,19 +400,18 @@ private fun Content(
             }
         }
         Spacer(Modifier.height(10.dp))
-        LogFooter(palette)
+        LogFooter(palette, logDir, onRefreshLog)
     }
 }
 
 @Composable
-private fun LogFooter(palette: Palette) {
+private fun LogFooter(palette: Palette, logDir: String, onRefresh: () -> Unit) {
     val context = LocalContext.current
-    var version by remember { mutableIntStateOf(0) }
-    key(version) {
-        BasicText(
-            text = "日志目录：${LogHub.rootPath.ifBlank { "未初始化" }}",
+    val label = logDir.ifBlank { LogHub.rootPath }
+    BasicText(
+            text = "日志目录：${label.ifBlank { "未初始化" }}",
             style = TextStyle(fontSize = 12.sp, color = palette.hint),
-            modifier = Modifier.semantics { contentDescription = "日志目录，${LogHub.rootPath}" },
+            modifier = Modifier.semantics { contentDescription = "日志目录，$label" },
         )
         if (LogHub.degraded) {
             Spacer(Modifier.height(4.dp))
@@ -414,13 +435,9 @@ private fun LogFooter(palette: Palette) {
             BasicText(
                 text = "授权后点这里刷新目录",
                 style = TextStyle(fontSize = 12.sp, color = palette.accent),
-                modifier = Modifier.clickable {
-                    LogHub.init(context)
-                    version++
-                },
+                modifier = Modifier.clickable { onRefresh() },
             )
         }
-    }
 }
 
 @Composable
@@ -530,6 +547,92 @@ private fun ReadCard(
                 contentAlignment = Alignment.Center,
             ) {
                 BasicText(text = "再念一遍", style = TextStyle(fontSize = 17.sp, color = palette.accent))
+            }
+        }
+    }
+}
+
+/**
+ * 语音输入：说一句 → 上屏 → 你可以复制、也可以直接念一遍。
+ * 目前不自动往别的 App 输入框填字（那要走 AccessibilityService，需要用户单独授权）。
+ */
+@Composable
+private fun VoiceInputCard(
+    state: AsrSession.UiState,
+    ready: Boolean,
+    notReadyReason: String?,
+    palette: Palette,
+    onToggleMic: () -> Unit,
+    onSpeak: (String) -> Unit,
+) {
+    val context = LocalContext.current
+    var copied by remember { mutableStateOf(false) }
+    val text = state.committed.ifBlank { state.partial }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(palette.card, RoundedCornerShape(18.dp))
+            .padding(18.dp),
+    ) {
+        BasicText(
+            text = when {
+                state.error != null -> state.error!!
+                !ready -> notReadyReason ?: "对话引擎还没就绪"
+                text.isNotBlank() -> text
+                state.listening -> "正在听……"
+                else -> "点下面的按钮，说完会显示在这里"
+            },
+            style = TextStyle(fontSize = 20.sp, color = palette.textPrimary),
+        )
+        Spacer(Modifier.height(14.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp)
+                .background(if (state.listening) palette.danger else palette.accent, RoundedCornerShape(14.dp))
+                .semantics { contentDescription = if (state.listening) "停止录音" else "开始录音" }
+                .clickable(onClick = onToggleMic),
+            contentAlignment = Alignment.Center,
+        ) {
+            BasicText(
+                text = if (state.listening) "停止" else "开始说话",
+                style = TextStyle(fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White),
+            )
+        }
+        if (text.isNotBlank()) {
+            Spacer(Modifier.height(10.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(52.dp)
+                        .background(palette.accentSoft, RoundedCornerShape(14.dp))
+                        .semantics { contentDescription = "复制识别结果" }
+                        .clickable {
+                            val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                                    as android.content.ClipboardManager
+                            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("我来帮你", text))
+                            copied = true
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    BasicText(
+                        text = if (copied) "已复制" else "复制",
+                        style = TextStyle(fontSize = 16.sp, color = palette.accent),
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(52.dp)
+                        .background(palette.accentSoft, RoundedCornerShape(14.dp))
+                        .semantics { contentDescription = "朗读识别结果" }
+                        .clickable { onSpeak(text) },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    BasicText(text = "念一遍", style = TextStyle(fontSize = 16.sp, color = palette.accent))
+                }
             }
         }
     }
