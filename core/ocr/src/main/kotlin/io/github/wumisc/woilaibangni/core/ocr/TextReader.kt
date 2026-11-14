@@ -98,6 +98,10 @@ class PpOcrTextReader(private val minConfidence: Float = 0.5f) : TextReader {
         boxList.mapNotNull { box ->
             val decoded = e.recognize(bitmap, box) ?: return@mapNotNull null
             val text = decoded.text.trim()
+            LogHub.ocr(
+                "WOILAI_OCR",
+                "box=${box.width()}x${box.height()} conf=${"%.2f".format(decoded.confidence)} text=${decoded.text.take(40)}",
+            )
             if (text.isEmpty() || decoded.confidence < minConfidence) return@mapNotNull null
             OcrLine(text, box.left, box.top, box.right, box.bottom)
         }.sortedWith(compareBy({ (it.top + it.bottom) / 2 }, { it.left }))

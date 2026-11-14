@@ -57,9 +57,6 @@ import androidx.core.content.ContextCompat
 import io.github.wumisc.woilaibangni.core.aac.AacDeck
 import io.github.wumisc.woilaibangni.core.aac.BoardDefaults
 import io.github.wumisc.woilaibangni.core.asr.AsrSession
-import io.github.wumisc.woilaibangni.core.asr.SherpaOfflineAsrEngine
-import io.github.wumisc.woilaibangni.core.asr.SherpaStreamingAsrEngine
-import io.github.wumisc.woilaibangni.core.asr.TwoPassAsrEngine
 import io.github.wumisc.woilaibangni.core.log.LogHub
 import io.github.wumisc.woilaibangni.core.ocr.PpOcrTextReader
 import io.github.wumisc.woilaibangni.core.ocr.ReadingPipeline
@@ -180,10 +177,7 @@ fun App() {
 
         val palette = if (isSystemInDarkTheme()) DarkPalette else LightPalette
 
-        val streaming = remember { SherpaStreamingAsrEngine() }
-        val asr = remember {
-            AsrSession(engine = TwoPassAsrEngine(streaming, SherpaOfflineAsrEngine()))
-        }
+        val asr = remember { AsrRuntime.session(context) }
         val speaker = remember { AndroidTextSpeaker(context) }
         val ocrReader = remember { PpOcrTextReader() }
         val reading = remember { ReadingPipeline(ocrReader) }
@@ -227,8 +221,7 @@ fun App() {
                 if (!engineReady) {
                     val dir = File(models, "asr-stream")
                     val bundled = BundledModels.hasBundled(context)
-                    notReadyReason = streaming.lastError
-                        ?: if (!bundled) {
+                    notReadyReason = if (!bundled) {
                             "这是轻量包（slim），没有内置模型。请安装 full 包（227MB），" +
                                 "或把 encoder/decoder/joiner/tokens 放进 $dir"
                         } else {
@@ -244,7 +237,7 @@ fun App() {
 
         DisposableEffect(Unit) {
             onDispose {
-                asr.release()
+                // 会话是全进程共用的，Activity 退到后台不释放，免得悬浮字幕断掉
                 speaker.shutdown()
                 reading.release()
             }
@@ -334,11 +327,6 @@ fun App() {
                 onToggleMic = {
                     if (asrState.listening) {
                         asr.stop()
-                    } else if (overlayRunning) {
-                        CaptionOverlayService.stop(context)
-                        overlayRunning = false
-                        val ok = asr.start()
-                        if (!ok) notReadyReason = asrState.error ?: "无法打开麦克风"
                     } else if (!given(Manifest.permission.RECORD_AUDIO)) {
                         micPermission.launch(Manifest.permission.RECORD_AUDIO)
                     } else {
@@ -370,8 +358,7 @@ fun App() {
                             )
                         }
                     } else {
-                        // 同一时刻只能有一路 AudioRecord 真正拿到声音，抢了就是静音
-                        asr.stop()
+                        // 共用同一个 AsrSession，不再另起录音，避免抢麦
                         CaptionOverlayService.start(context)
                         overlayRunning = true
                     }

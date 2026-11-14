@@ -63,8 +63,7 @@ class CaptionOverlayService : Service() {
         running = false
         LogHub.app(TAG, "悬浮字幕服务停止")
         scope.cancel()
-        session?.release()
-        session = null
+        // 不释放共用会话，主界面还在用
         captionView?.let { view -> runCatching { windowManager.removeView(view) } }
         captionView = null
         super.onDestroy()
@@ -142,10 +141,7 @@ class CaptionOverlayService : Service() {
     }
 
     private fun startListening() {
-        val asr = AsrSession(
-            engine = TwoPassAsrEngine(SherpaStreamingAsrEngine(), SherpaOfflineAsrEngine()),
-            label = "overlay",
-        )
+        val asr = AsrRuntime.session(this)
         session = asr
 
         scope.launch { collect(asr) }
