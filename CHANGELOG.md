@@ -1,5 +1,29 @@
 # 更新日志
 
+## v0.5.4-m10（2026-11-13）
+
+对着真机日志修的第二个版本。
+
+### 1. 拍照识字一直失败（已定位）
+```
+java.lang.UnsatisfiedLinkError: dlopen failed:
+cannot locate symbol "OrtGetApiBase" referenced by libonnxruntime4j_jni.so
+```
+原因：APK 里同时存在两份 `libonnxruntime.so`——sherpa 自带的 1.28.2 与
+onnxruntime-android AAR 的 1.28.0，`pickFirsts` 保了 sherpa 那份。
+sherpa 那份把 `OrtGetApiBase` 导出成 `@@VERS_1.28.2`，Java 绑定要的是无版本符号，
+所以 OCR 一加载就死。
+
+修法：删掉 sherpa 那份运行时，只留 AAR 的 1.28.0；把 sherpa 的 jni/c-api 里
+GNU 版本需求（字符串 + hash）从 `VERS_1.28.2` 改标到 `VERS_1.28.0`
+（`tools/patch-ort-version.py`）。两者现在共用同一个运行时。
+
+### 2. 对话一直没字幕
+日志显示 `recorder start=true` 后再无任何事件 —— VAD 从未判定"有人说话"。
+- 阈值从 0.012 降到 0.004；
+- 每秒往 `asr.log` 写一行电平 `level peak=0.0xxx`，能直接看出麦克风有没有收到声音；
+- 手动点「停止」时也把这句定稿，不再完全依赖 VAD。
+
 ## v0.5.3-m9（2026-11-13）
 
 自查型版本：不再让你猜"到底装了什么"。

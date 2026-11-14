@@ -26,7 +26,7 @@ class AsrSession(
     private val recorder: PcmRecorder = PcmRecorder(),
     private val engine: StreamingAsrEngine = DemoAsrEngine(),
     private val silenceHoldMs: Long = 600,
-    private val speechThreshold: Float = 0.012f,
+    private val speechThreshold: Float = 0.004f,
 ) {
 
     data class UiState(
@@ -51,6 +51,9 @@ class AsrSession(
     private var lastVoiceAt = 0L
     private var utteranceStartedAt = 0L
     private var firstPartialLogged = false
+    private var lastLevelLogAt = 0L
+    private var windowPeak = 0f
+    private var frameCount = 0
 
     /** 当前这句的 PCM，供第二遍识别使用；按块累积，避免整段复制。 */
     private val utteranceChunks = ArrayList<ShortArray>()
@@ -69,7 +72,24 @@ class AsrSession(
     }
 
     fun stop() {
+        val pending = _state.value.speaking || utteranceSamples > 0
         recorder.stop()
+        // 手动停止时也把这句定稿，不依赖 VAD 判定
+        if (pending) {
+            val text = runCatching { engine.finishUtterance() }.getOrDefault("")
+            if (text.isNotBlank()) {
+                val captured = buildUtterance()
+                _state.value = _state.value.copy(
+                    listening = false,
+                    speaking = false,
+                    partial = "",
+                    committed = text,
+                )
+                refineAsync(text, captured)
+            } else {
+                _state.value = _state.value.copy(listening = false, speaking = false, partial = "")
+            }
+        }
         LogHub.asr("WOILAI_ASR", "recorder stopped")
         _state.value = _state.value.copy(listening = false, speaking = false)
     }
@@ -83,6 +103,16 @@ class AsrSession(
     private fun onFrame(frame: ShortArray) {
         val rms = rms(frame)
         val now = SystemClock.elapsedRealtime()
+
+        // 每秒打一次电平，用来判断"到底有没有收到声音"
+        frameCount++
+        if (rms > windowPeak) windowPeak = rms
+        if (now - lastLevelLogAt >= 1000) {
+            LogHub.asr("WOILAI_ASR", "level peak=${"%.4f".format(windowPeak)} speaking=${_state.value.speaking}")
+            lastLevelLogAt = now
+            windowPeak = 0f
+            frameCount = 0
+        }
 
         if (rms >= speechThreshold) {
             lastVoiceAt = now

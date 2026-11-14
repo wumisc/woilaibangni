@@ -44,8 +44,8 @@ android {
         applicationId = "io.github.wumisc.woilaibangni"
         minSdk = 26
         targetSdk = 37
-        versionCode = 10
-        versionName = "0.5.3-m9"
+        versionCode = 11
+        versionName = "0.5.4-m10"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
 
@@ -76,8 +76,8 @@ android {
 
     packaging {
         resources.excludes += setOf("META-INF/AL2.0", "META-INF/LGPL2.1")
-        // sherpa-onnx 的预编译包与 onnxruntime-android AAR 都带 libonnxruntime.so，
-        // 两者版本已对齐（1.28.2），保留任意一份即可
-        jniLibs.pickFirsts += setOf("**/libonnxruntime.so")
+        // 只保留 onnxruntime-android AAR 里的 libonnxruntime.so（带 OrtGetApiBase@VERS_1.28.0）。
+        // sherpa 预编译包自带的 1.28.2 运行时导出的是 VERS_1.28.2，Java 绑定解析不了，
+        // 所以删掉了那份；sherpa 的 jni/c-api 已把版本需求改标到 VERS_1.28.0（tools/patch-ort-version.py）。
     }
 }
