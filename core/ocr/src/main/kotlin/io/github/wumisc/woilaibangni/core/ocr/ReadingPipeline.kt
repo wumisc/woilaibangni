@@ -2,6 +2,7 @@ package io.github.wumisc.woilaibangni.core.ocr
 
 import android.graphics.Bitmap
 import android.os.SystemClock
+import io.github.wumisc.woilaibangni.core.log.LogHub
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -23,9 +24,15 @@ class ReadingPipeline(private val reader: TextReader) {
 
     suspend fun read(bitmap: Bitmap): ReadingResult = withContext(Dispatchers.Default) {
         val started = SystemClock.elapsedRealtime()
+        LogHub.ocr("WOILAI_OCR", "read 开始 ${bitmap.width}x${bitmap.height} ready=$isReady")
         val lines = reader.read(bitmap)
         val paragraphs = LineGrouper.toParagraphs(lines)
-        ReadingResult(lines = lines, paragraphs = paragraphs, elapsedMs = SystemClock.elapsedRealtime() - started)
+        val cost = SystemClock.elapsedRealtime() - started
+        LogHub.ocr(
+            "WOILAI_OCR",
+            "read 完成 lines=${lines.size} paragraphs=${paragraphs.size} cost=${cost}ms text=${paragraphs.joinToString(" | ").take(200)}",
+        )
+        ReadingResult(lines = lines, paragraphs = paragraphs, elapsedMs = cost)
     }
 
     fun release() = reader.release()

@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.wumisc.woilaibangni.core.aac.AacBoard
 import io.github.wumisc.woilaibangni.core.aac.AacDeck
+import io.github.wumisc.woilaibangni.core.log.LogHub
 import io.github.wumisc.woilaibangni.core.aac.BoardButton
 import io.github.wumisc.woilaibangni.core.aac.ScanMode
 import io.github.wumisc.woilaibangni.core.aac.SwitchScanner
@@ -62,6 +63,10 @@ internal fun BoardScreen(
     }
     val scanner = remember(board) { SwitchScanner(board, ScanMode.LINEAR) }
 
+    LaunchedEffect(board) {
+        LogHub.app("WOILAI_BOARD", "板名=${board.name} 行=${board.rows} 列=${board.columns} 根板=${deck.rootBoard?.id}")
+    }
+
     LaunchedEffect(scanEnabled, board) {
         if (!scanEnabled) {
             highlight = null
@@ -77,6 +82,7 @@ internal fun BoardScreen(
     }
 
     fun activate(button: BoardButton) {
+        LogHub.app("WOILAI_BOARD", "tap label=${button.label} spoken=${button.spokenText} action=${button.action} load=${button.loadBoardId}")
         when {
             button.loadBoardId == ":home" -> boardId = deck.rootBoard?.id
             button.loadBoardId != null -> boardId = button.loadBoardId
@@ -89,6 +95,7 @@ internal fun BoardScreen(
                 val spoken = button.spokenText
                 if (spoken.isNotBlank()) {
                     phrase = if (phrase.isBlank()) spoken else "$phrase$spoken"
+                    LogHub.app("WOILAI_BOARD", "speak: $spoken")
                     onSpeak(spoken)
                 }
             }

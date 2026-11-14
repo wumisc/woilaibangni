@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Bundle
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import io.github.wumisc.woilaibangni.core.log.LogHub
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.util.Locale
@@ -38,8 +39,10 @@ class AndroidTextSpeaker(context: Context) : TextSpeaker {
                 val lang = runCatching { tts.setLanguage(Locale.SIMPLIFIED_CHINESE) }.getOrDefault(-1)
                 _ready.value = lang != TextToSpeech.LANG_MISSING_DATA &&
                     lang != TextToSpeech.LANG_NOT_SUPPORTED
+                LogHub.app("WOILAI_TTS", "TTS 初始化 status=SUCCESS lang=$lang ready=${_ready.value}")
             } else {
                 _ready.value = false
+                LogHub.app("WOILAI_TTS", "TTS 初始化失败 status=$status（系统可能没有中文语音引擎）")
             }
         }
         runCatching {
@@ -54,8 +57,15 @@ class AndroidTextSpeaker(context: Context) : TextSpeaker {
 
     override fun speak(text: String) {
         if (text.isBlank()) return
-        tts.setSpeechRate(rate)
-        tts.speak(text, TextToSpeech.QUEUE_FLUSH, Bundle(), "u-${UUID.randomUUID()}")
+        LogHub.app("WOILAI_TTS", "speak len=${text.length} ready=${_ready.value} rate=$rate")
+        runCatching { tts.setSpeechRate(rate) }
+        val ret = runCatching {
+            tts.speak(text, TextToSpeech.QUEUE_FLUSH, Bundle(), "u-${UUID.randomUUID()}")
+        }.getOrElse {
+            LogHub.error(LogHub.Channel.APP, "WOILAI_TTS", "speak 异常", it)
+            -1
+        }
+        if (ret != TextToSpeech.SUCCESS) LogHub.app("WOILAI_TTS", "speak 返回 $ret")
     }
 
     override fun stop() {

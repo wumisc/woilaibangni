@@ -1,5 +1,30 @@
 # 更新日志
 
+## v0.5.6-m12（2026-11-14）
+
+对着 m11 的实机结论修的一版，重点是把「为什么」写进日志。
+
+### 1. 悬浮字幕不出字（已定位）
+`asr.log` 里悬浮那一路 `level peak` 一直 0.0015 上下、`speaking=false`，
+而同一时刻主界面能正常出字——同一 App 开了两路 `AudioRecord`，
+系统只把声音喂给先占用的那一路，另一路拿到的是静音。
+
+改法：**互斥**。开悬浮字幕时自动停掉主界面录音；在主界面点「开始对话」时
+自动关掉悬浮字幕。两路日志现在分别带 `[main]` / `[overlay]` 前缀，一眼能分清。
+
+### 2. 看世界不对劲（已定位）
+`det boxes=1 size=192x256` —— 之前用的是 `TakePicturePreview`，
+拿到的是相机**缩略预览图**，才 192×256，OCR 当然读不出东西。
+
+改法：换成 `TakePicture` 全尺寸拍照（FileProvider 写缓存目录），
+解码时按 EXIF 转正、长边压到 1600，再进 PP-OCRv5。
+
+### 3. 新增日志（这次要能自己说话）
+- 拍照：`WOILAI_OCR 相机返回 WxH`、`read 完成 lines= paragraphs= cost=ms text=...`
+- 短句板：`WOILAI_BOARD 板名/行/列`、`tap label= spoken= action=`、`speak: ...`
+- 发声：`WOILAI_TTS TTS 初始化 status= lang= ready=`、`speak len= ready=`、返回值
+- 悬浮字幕：服务启动/停止、模型未就绪、开始录音
+
 ## v0.5.5-m11（2026-11-14）
 
 新增**悬浮字幕**：字幕浮在其他应用上面（视频、微信、会议都能看）。

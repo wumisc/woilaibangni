@@ -5,6 +5,9 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.ImageDecoder
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -48,6 +51,8 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.FileProvider
+import java.io.File
 import androidx.core.content.ContextCompat
 import io.github.wumisc.woilaibangni.core.aac.AacDeck
 import io.github.wumisc.woilaibangni.core.aac.BoardDefaults
@@ -59,7 +64,6 @@ import io.github.wumisc.woilaibangni.core.log.LogHub
 import io.github.wumisc.woilaibangni.core.ocr.PpOcrTextReader
 import io.github.wumisc.woilaibangni.core.ocr.ReadingPipeline
 import io.github.wumisc.woilaibangni.core.tts.AndroidTextSpeaker
-import java.io.File
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -261,12 +265,16 @@ fun App() {
             else notReadyReason = "没有录音权限，无法开始对话"
         }
 
+        val shotFile = remember { File(context.cacheDir, "shots/ocr-shot.jpg").apply { parentFile?.mkdirs() } }
         val camera = rememberLauncherForActivityResult(
-            ActivityResultContracts.TakePicturePreview()
-        ) { bitmap ->
+            ActivityResultContracts.TakePicture()
+        ) { ok ->
+            val bitmap = if (!ok) null else loadPhoto(shotFile)
             if (bitmap == null) {
-                readHint = "没有拿到照片，可能取消了拍摄"
+                readHint = if (ok) "照片读不出来，可能存储空间不足" else "没有拿到照片，可能取消了拍摄"
+                LogHub.ocr("WOILAI_OCR", "相机返回空 bitmap ok=$ok 文件=${shotFile.length() / 1024}KB")
             } else {
+                LogHub.ocr("WOILAI_OCR", "相机返回 ${bitmap.width}x${bitmap.height}")
                 scope.launch {
                     runCatching {
                         val result = reading.read(bitmap)
@@ -299,7 +307,7 @@ fun App() {
         ) { granted ->
             // 声明了 CAMERA 权限就必须先拿到授权，否则启动系统相机直接抛 SecurityException
             if (granted) {
-                runCatching { camera.launch(null) }
+                runCatching { camera.launch(shotUri(context, shotFile)) }
                     .onFailure { readHint = "无法打开相机：${it.message ?: "未知原因"}" }
             } else {
                 readHint = "没有相机权限，无法拍照"
@@ -326,6 +334,11 @@ fun App() {
                 onToggleMic = {
                     if (asrState.listening) {
                         asr.stop()
+                    } else if (overlayRunning) {
+                        CaptionOverlayService.stop(context)
+                        overlayRunning = false
+                        val ok = asr.start()
+                        if (!ok) notReadyReason = asrState.error ?: "无法打开麦克风"
                     } else if (!given(Manifest.permission.RECORD_AUDIO)) {
                         micPermission.launch(Manifest.permission.RECORD_AUDIO)
                     } else {
@@ -337,7 +350,7 @@ fun App() {
                     if (!given(Manifest.permission.CAMERA)) {
                         cameraPermission.launch(Manifest.permission.CAMERA)
                     } else {
-                        runCatching { camera.launch(null) }
+                        runCatching { camera.launch(shotUri(context, shotFile)) }
                             .onFailure { readHint = "无法打开相机：${it.message ?: "未知原因"}" }
                     }
                 },
@@ -357,6 +370,8 @@ fun App() {
                             )
                         }
                     } else {
+                        // 同一时刻只能有一路 AudioRecord 真正拿到声音，抢了就是静音
+                        asr.stop()
                         CaptionOverlayService.start(context)
                         overlayRunning = true
                     }
@@ -742,3 +757,30 @@ private fun TabBar(selected: Int, palette: Palette, onSelect: (Int) -> Unit) {
         }
     }
 }
+
+/** 相机原图可能几千像素，OCR 不需要那么大；长边压到 1600 以内。 */
+private fun loadPhoto(file: File): Bitmap? = runCatching {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        val source = ImageDecoder.createSource(file)
+        ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+            // ImageDecoder 会按 EXIF 自动转正，这里只限尺寸
+            val longest = maxOf(info.size.width, info.size.height)
+            if (longest > 1600) {
+                val scale = 1600f / longest
+                decoder.setTargetSize(
+                    (info.size.width * scale).toInt().coerceAtLeast(1),
+                    (info.size.height * scale).toInt().coerceAtLeast(1),
+                )
+            }
+        }
+    } else {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file.absolutePath, bounds)
+        var sample = 1
+        while (maxOf(bounds.outWidth, bounds.outHeight) / sample > 1600) sample *= 2
+        BitmapFactory.decodeFile(file.absolutePath, BitmapFactory.Options().apply { inSampleSize = sample })
+    }
+}.getOrNull()
+
+private fun shotUri(context: android.content.Context, file: File) =
+    FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)

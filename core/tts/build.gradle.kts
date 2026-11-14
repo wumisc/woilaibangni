@@ -19,4 +19,5 @@ kotlin {
 
 dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    implementation(project(":core:log"))
 }

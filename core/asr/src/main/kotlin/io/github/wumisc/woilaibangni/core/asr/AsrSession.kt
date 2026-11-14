@@ -27,6 +27,8 @@ class AsrSession(
     private val engine: StreamingAsrEngine = DemoAsrEngine(),
     private val silenceHoldMs: Long = 600,
     private val speechThreshold: Float = 0.004f,
+    /** 日志前缀，区分主界面与悬浮字幕两路会话。 */
+    private val label: String = "main",
 ) {
 
     data class UiState(
@@ -66,7 +68,7 @@ class AsrSession(
     fun start(): Boolean {
         if (_state.value.listening) return true
         val ok = recorder.start { frame -> onFrame(frame) }
-        LogHub.asr("WOILAI_ASR", "recorder start=$ok")
+        LogHub.asr("WOILAI_ASR", "[$label] recorder start=$ok")
         _state.value = _state.value.copy(listening = ok, error = if (ok) null else "无法打开麦克风，请检查录音权限")
         return ok
     }
@@ -90,7 +92,7 @@ class AsrSession(
                 _state.value = _state.value.copy(listening = false, speaking = false, partial = "")
             }
         }
-        LogHub.asr("WOILAI_ASR", "recorder stopped")
+        LogHub.asr("WOILAI_ASR", "[$label] recorder stopped")
         _state.value = _state.value.copy(listening = false, speaking = false)
     }
 
@@ -108,7 +110,7 @@ class AsrSession(
         frameCount++
         if (rms > windowPeak) windowPeak = rms
         if (now - lastLevelLogAt >= 1000) {
-            LogHub.asr("WOILAI_ASR", "level peak=${"%.4f".format(windowPeak)} speaking=${_state.value.speaking}")
+            LogHub.asr("WOILAI_ASR", "[$label] level peak=${"%.4f".format(windowPeak)} speaking=${_state.value.speaking}")
             lastLevelLogAt = now
             windowPeak = 0f
             frameCount = 0

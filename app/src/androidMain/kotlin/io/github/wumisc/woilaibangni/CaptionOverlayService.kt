@@ -48,6 +48,7 @@ class CaptionOverlayService : Service() {
     override fun onCreate() {
         super.onCreate()
         running = true
+        LogHub.app(TAG, "悬浮字幕服务启动")
         startAsForeground()
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         addOverlay()
@@ -60,6 +61,7 @@ class CaptionOverlayService : Service() {
 
     override fun onDestroy() {
         running = false
+        LogHub.app(TAG, "悬浮字幕服务停止")
         scope.cancel()
         session?.release()
         session = null
@@ -142,6 +144,7 @@ class CaptionOverlayService : Service() {
     private fun startListening() {
         val asr = AsrSession(
             engine = TwoPassAsrEngine(SherpaStreamingAsrEngine(), SherpaOfflineAsrEngine()),
+            label = "overlay",
         )
         session = asr
 
