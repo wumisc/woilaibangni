@@ -248,6 +248,7 @@ fun App() {
 
         val asrState by asr.state.collectAsState()
         var selected by remember { mutableIntStateOf(0) }
+        var overlayRunning by remember { mutableStateOf(CaptionOverlayService.running) }
 
         fun given(permission: String) = ContextCompat.checkSelfPermission(
             context, permission
@@ -281,6 +282,15 @@ fun App() {
                         LogHub.error(LogHub.Channel.OCR, "WOILAI_OCR", "拍照识别失败", it)
                     }
                 }
+            }
+        }
+
+        val overlayPermission = rememberLauncherForActivityResult(
+            ActivityResultContracts.StartActivityForResult()
+        ) {
+            if (Settings.canDrawOverlays(context)) {
+                CaptionOverlayService.start(context)
+                overlayRunning = true
             }
         }
 
@@ -332,6 +342,25 @@ fun App() {
                     }
                 },
                 onSpeak = { speaker.speak(it) },
+                overlayRunning = overlayRunning,
+                onToggleOverlay = {
+                    if (overlayRunning) {
+                        CaptionOverlayService.stop(context)
+                        overlayRunning = false
+                    } else if (!Settings.canDrawOverlays(context)) {
+                        runCatching {
+                            overlayPermission.launch(
+                                Intent(
+                                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                    Uri.parse("package:${context.packageName}"),
+                                )
+                            )
+                        }
+                    } else {
+                        CaptionOverlayService.start(context)
+                        overlayRunning = true
+                    }
+                },
                 modifier = Modifier.weight(1f),
             )
             TabBar(selected = selected, palette = palette, onSelect = { selected = it })
@@ -356,6 +385,8 @@ private fun Content(
     onToggleMic: () -> Unit,
     onCapture: () -> Unit,
     onSpeak: (String) -> Unit,
+    overlayRunning: Boolean,
+    onToggleOverlay: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -389,7 +420,9 @@ private fun Content(
                 ready = engineReady,
                 notReadyReason = notReadyReason,
                 palette = palette,
+                overlayRunning = overlayRunning,
                 onToggleMic = onToggleMic,
+                onToggleOverlay = onToggleOverlay,
             )
             "看世界" -> ReadCard(readText, readHint, palette, onCapture, onSpeak)
             "语音输入" -> VoiceInputCard(
@@ -463,7 +496,9 @@ private fun LiveCaptionCard(
     ready: Boolean,
     notReadyReason: String?,
     palette: Palette,
+    overlayRunning: Boolean,
     onToggleMic: () -> Unit,
+    onToggleOverlay: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -513,6 +548,21 @@ private fun LiveCaptionCard(
             BasicText(
                 text = if (state.speaking) "检测到声音，正在识别" else "已开始录音，等待声音",
                 style = TextStyle(fontSize = 13.sp, color = palette.captionSub),
+            )
+        }
+        Spacer(Modifier.height(10.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(46.dp)
+                .background(Color(0x22FFFFFF), RoundedCornerShape(12.dp))
+                .semantics { contentDescription = if (overlayRunning) "关闭悬浮字幕" else "开启悬浮字幕" }
+                .clickable(onClick = onToggleOverlay),
+            contentAlignment = Alignment.Center,
+        ) {
+            BasicText(
+                text = if (overlayRunning) "关闭悬浮字幕" else "悬浮字幕（显示在其他应用上层）",
+                style = TextStyle(fontSize = 15.sp, color = palette.captionText),
             )
         }
     }

@@ -44,8 +44,8 @@ android {
         applicationId = "io.github.wumisc.woilaibangni"
         minSdk = 26
         targetSdk = 37
-        versionCode = 11
-        versionName = "0.5.4-m10"
+        versionCode = 12
+        versionName = "0.5.5-m11"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
 
