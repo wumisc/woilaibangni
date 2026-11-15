@@ -286,6 +286,10 @@ fun App() {
             }
         }
 
+        val notificationPermission = rememberLauncherForActivityResult(
+            ActivityResultContracts.RequestPermission()
+        ) { }
+
         val overlayPermission = rememberLauncherForActivityResult(
             ActivityResultContracts.StartActivityForResult()
         ) {
@@ -301,7 +305,10 @@ fun App() {
             // 声明了 CAMERA 权限就必须先拿到授权，否则启动系统相机直接抛 SecurityException
             if (granted) {
                 runCatching { camera.launch(shotUri(context, shotFile)) }
-                    .onFailure { readHint = "无法打开相机：${it.message ?: "未知原因"}" }
+                    .onFailure {
+                        readHint = "无法打开相机：${it.message ?: "未知原因"}"
+                        LogHub.error(LogHub.Channel.APP, "WOILAI_CAMERA", "启动相机失败", it)
+                    }
             } else {
                 readHint = "没有相机权限，无法拍照"
             }
@@ -339,7 +346,10 @@ fun App() {
                         cameraPermission.launch(Manifest.permission.CAMERA)
                     } else {
                         runCatching { camera.launch(shotUri(context, shotFile)) }
-                            .onFailure { readHint = "无法打开相机：${it.message ?: "未知原因"}" }
+                            .onFailure {
+                                readHint = "无法打开相机：${it.message ?: "未知原因"}"
+                                LogHub.error(LogHub.Channel.APP, "WOILAI_CAMERA", "启动相机失败", it)
+                            }
                     }
                 },
                 onSpeak = { speaker.speak(it) },
@@ -358,6 +368,12 @@ fun App() {
                             )
                         }
                     } else {
+                        // 前台服务的常驻通知在 Android 13+ 需要通知权限，否则用户看不到"正在听"
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                            !given(Manifest.permission.POST_NOTIFICATIONS)
+                        ) {
+                            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        }
                         // 共用同一个 AsrSession，不再另起录音，避免抢麦
                         CaptionOverlayService.start(context)
                         overlayRunning = true

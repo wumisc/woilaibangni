@@ -10,6 +10,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.sqrt
 
 /**
@@ -50,6 +51,9 @@ class AsrSession(
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
+    /** 防止 start/stop 重入：连点按钮、服务与界面同时调用都只生效一次。 */
+    private val startGuard = AtomicBoolean(false)
+
     private var lastVoiceAt = 0L
     private var utteranceStartedAt = 0L
     private var firstPartialLogged = false
@@ -66,14 +70,34 @@ class AsrSession(
         (engine as? TwoPassAsrEngine)?.prepare(streamDir, offlineDir) ?: engine.prepare(streamDir)
 
     fun start(): Boolean {
-        if (_state.value.listening) return true
-        val ok = recorder.start { frame -> onFrame(frame) }
+        if (!startGuard.compareAndSet(false, true)) return _state.value.listening
+        // 每次开麦都从干净状态开始，避免上一轮残留的 VAD 计数把句子判错
+        lastVoiceAt = 0L
+        utteranceStartedAt = 0L
+        firstPartialLogged = false
+        utteranceChunks.clear()
+        utteranceSamples = 0
+        val ok = runCatching { recorder.start { frame -> onFrame(frame) } }.getOrElse {
+            LogHub.error(LogHub.Channel.ASR, "WOILAI_ASR", "[$label] 录音启动异常", it)
+            false
+        }
+        if (!ok) startGuard.set(false)
         LogHub.asr("WOILAI_ASR", "[$label] recorder start=$ok")
-        _state.value = _state.value.copy(listening = ok, error = if (ok) null else "无法打开麦克风，请检查录音权限")
+        _state.value = _state.value.copy(
+            listening = ok,
+            speaking = false,
+            partial = "",
+            error = if (ok) null else "无法打开麦克风，请检查录音权限",
+        )
         return ok
     }
 
     fun stop() {
+        if (!startGuard.compareAndSet(true, false)) {
+            // 没在录音，但可能残留 listening=true，顺手清掉
+            if (_state.value.listening) _state.value = _state.value.copy(listening = false, speaking = false, partial = "")
+            return
+        }
         val pending = _state.value.speaking || utteranceSamples > 0
         recorder.stop()
         // 手动停止时也把这句定稿，不依赖 VAD 判定

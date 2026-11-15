@@ -52,7 +52,12 @@ class PcmRecorder(
         worker = thread(name = "pcm-recorder", isDaemon = true) {
             val buf = ShortArray(frameSize)
             while (running) {
-                val n = rec.read(buf, 0, buf.size)
+                val n = runCatching { rec.read(buf, 0, buf.size) }.getOrDefault(-1)
+                if (n < 0) {
+                    // 麦克风被系统收回（权限撤销、通话抢占）时 read 会持续返回错误
+                    running = false
+                    break
+                }
                 if (n > 0) onFrame(if (n == buf.size) buf.copyOf() else buf.copyOf(n))
             }
         }

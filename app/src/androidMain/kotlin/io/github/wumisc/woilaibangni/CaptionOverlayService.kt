@@ -189,6 +189,10 @@ class CaptionOverlayService : Service() {
             private set
 
         fun start(context: Context) {
+            if (running) {
+                LogHub.app(TAG, "悬浮字幕已在运行，忽略重复启动")
+                return
+            }
             ContextCompat.startForegroundService(
                 context,
                 Intent(context, CaptionOverlayService::class.java),
