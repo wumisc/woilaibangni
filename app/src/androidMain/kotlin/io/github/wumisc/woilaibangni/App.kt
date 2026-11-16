@@ -37,6 +37,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -63,6 +64,10 @@ import io.github.wumisc.woilaibangni.core.translate.TranslationMode
 import io.github.wumisc.woilaibangni.core.ocr.PpOcrTextReader
 import io.github.wumisc.woilaibangni.core.ocr.ReadingPipeline
 import io.github.wumisc.woilaibangni.core.tts.AndroidTextSpeaker
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -253,7 +258,24 @@ fun App() {
         var translationMode by remember { mutableStateOf(TranslationMode.ORIGINAL) }
         var translatedText by remember { mutableStateOf("") }
 
-        // 定稿一句就翻一句；翻译失败保留原文，绝不让字幕空着
+        // 边说边翻：中间结果停 600ms 没变就翻一次，让字幕跟得上嘴
+        LaunchedEffect(translationMode) {
+            if (translationMode == TranslationMode.ORIGINAL) return@LaunchedEffect
+            snapshotFlow { asrState.partial }
+                .debounce(600)
+                .distinctUntilChanged()
+                .collectLatest { partial ->
+                    if (partial.length < 3) return@collectLatest
+                    val result = translator.translate(partial, translationMode)
+                    if (result != null && asrState.speaking) {
+                        translatedText = result
+                        CaptionBus.main.value = result
+                        CaptionBus.original.value = partial
+                    }
+                }
+        }
+
+        // 定稿一句再翻一遍，纠正中间结果的错字；翻译失败保留原文
         LaunchedEffect(asrState.committed, translationMode) {
             val source = asrState.committed
             if (translationMode == TranslationMode.ORIGINAL || source.isBlank()) {

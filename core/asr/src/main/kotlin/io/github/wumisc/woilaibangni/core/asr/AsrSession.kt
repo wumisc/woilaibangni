@@ -26,7 +26,7 @@ import kotlin.math.sqrt
 class AsrSession(
     private val recorder: PcmRecorder = PcmRecorder(),
     private val engine: StreamingAsrEngine = DemoAsrEngine(),
-    private val silenceHoldMs: Long = 600,
+    private val silenceHoldMs: Long = 400,
     private val speechThreshold: Float = 0.004f,
     /** 日志前缀，区分主界面与悬浮字幕两路会话。 */
     private val label: String = "main",
