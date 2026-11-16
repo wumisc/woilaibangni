@@ -254,7 +254,19 @@ fun App() {
         val micPermission = rememberLauncherForActivityResult(
             ActivityResultContracts.RequestPermission()
         ) { granted ->
-            if (granted) asr.start()
+            if (granted) {
+                scope.launch {
+                    // 先确保模型就绪再开麦，否则录到的音频没人接
+                    if (!engineReady) {
+                        val models = File(context.filesDir, "models")
+                        engineReady = asr.prepare(
+                            File(models, "asr-stream").absolutePath,
+                            File(models, "asr-accurate").absolutePath,
+                        )
+                    }
+                    if (!asr.start()) notReadyReason = asrState.error ?: "无法打开麦克风"
+                }
+            }
             else notReadyReason = "没有录音权限，无法开始对话"
         }
 
@@ -337,8 +349,16 @@ fun App() {
                     } else if (!given(Manifest.permission.RECORD_AUDIO)) {
                         micPermission.launch(Manifest.permission.RECORD_AUDIO)
                     } else {
-                        val ok = asr.start()
-                        if (!ok) notReadyReason = asrState.error ?: "无法打开麦克风"
+                        scope.launch {
+                            if (!engineReady) {
+                                val models = File(context.filesDir, "models")
+                                engineReady = asr.prepare(
+                                    File(models, "asr-stream").absolutePath,
+                                    File(models, "asr-accurate").absolutePath,
+                                )
+                            }
+                            if (!asr.start()) notReadyReason = asrState.error ?: "无法打开麦克风"
+                        }
                     }
                 },
                 onCapture = {
