@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.IBinder
 import android.provider.Settings
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.WindowManager
 import android.widget.TextView
 import androidx.core.app.NotificationCompat
@@ -42,6 +43,7 @@ class CaptionOverlayService : Service() {
 
     private lateinit var windowManager: WindowManager
     private var captionView: TextView? = null
+    private var lp: WindowManager.LayoutParams? = null
     private var session: AsrSession? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
@@ -105,16 +107,19 @@ class CaptionOverlayService : Service() {
             stopSelf()
             return
         }
+        val metrics = resources.displayMetrics
+        val width = metrics.widthPixels - dp(24)
         val view = TextView(this).apply {
             setTextColor(Color.parseColor("#FFD75E"))
             textSize = 26f
-            setPadding(36, 28, 36, 28)
+            setPadding(dp(18), dp(14), dp(18), dp(14))
             setBackgroundColor(Color.parseColor("#CC000000"))
             text = "正在启动字幕……"
             gravity = Gravity.CENTER
+            isClickable = true
         }
         val lp = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.MATCH_PARENT,
+            width,
             WindowManager.LayoutParams.WRAP_CONTENT,
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -122,23 +127,53 @@ class CaptionOverlayService : Service() {
                 @Suppress("DEPRECATION")
                 WindowManager.LayoutParams.TYPE_PHONE
             },
-            // 不抢焦点、不吃触摸，避免挡住下方 App 的操作
+            // 只挡焦点不挡触摸：字幕条可以拖着走，不会吃掉整屏
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT,
         ).apply {
-            gravity = Gravity.BOTTOM
-            y = 220
+            gravity = Gravity.TOP or Gravity.START
+            x = dp(12)
+            y = (metrics.heightPixels * 0.72f).toInt()
         }
+
+        // 拖动：按住字幕条上下左右挪，位置限制在屏幕内
+        var startX = 0
+        var startY = 0
+        var downRawX = 0f
+        var downRawY = 0f
+        view.setOnTouchListener { _, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    startX = lp.x
+                    startY = lp.y
+                    downRawX = event.rawX
+                    downRawY = event.rawY
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val maxY = metrics.heightPixels - view.height
+                    lp.x = (startX + (event.rawX - downRawX).toInt()).coerceIn(-width / 3, metrics.widthPixels - width / 3)
+                    lp.y = (startY + (event.rawY - downRawY).toInt()).coerceIn(0, maxY.coerceAtLeast(0))
+                    runCatching { windowManager.updateViewLayout(view, lp) }
+                    true
+                }
+                else -> false
+            }
+        }
+
         runCatching {
             windowManager.addView(view, lp)
             captionView = view
+            this.lp = lp
+            LogHub.app(TAG, "悬浮条已添加 ${width}px，可拖动")
         }.onFailure {
             LogHub.error(LogHub.Channel.APP, TAG, "悬浮窗添加失败", it)
             stopSelf()
         }
     }
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     private fun startListening() {
         val asr = AsrRuntime.session(this)

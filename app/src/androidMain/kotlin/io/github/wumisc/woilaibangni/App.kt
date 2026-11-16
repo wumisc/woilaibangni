@@ -603,6 +603,10 @@ private fun LiveCaptionCard(
                 style = TextStyle(fontSize = 15.sp, color = palette.captionText),
             )
         }
+        BasicText(
+            text = "小米/红米：除了「显示在其他应用上层」，还要在 设置→应用管理→我来帮你→权限 里打开「后台弹出界面」，否则切到别的 App 字幕会消失。字幕条可按住拖动。",
+            style = TextStyle(fontSize = 11.sp, color = palette.captionSub),
+        )
     }
 }
 
