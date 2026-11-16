@@ -30,6 +30,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.launch
 
 /**
  * 悬浮字幕：把识别结果画在**别的 App 上面**（视频、微信、会议都行）。
@@ -201,8 +202,22 @@ class CaptionOverlayService : Service() {
     }
 
     private suspend fun collect(asr: AsrSession) {
+        kotlinx.coroutines.coroutineScope {
+            launch {
+                CaptionBus.main.collectLatest { text ->
+                    if (text.isNotBlank()) captionView?.text = text
+                }
+            }
+            launch {
+                collectState(asr)
+            }
+        }
+    }
+
+    private suspend fun collectState(asr: AsrSession) {
         asr.state.collectLatest { state ->
             val view = captionView ?: return@collectLatest
+            if (CaptionBus.main.value.isNotBlank()) return@collectLatest
             val text = when {
                 state.error != null -> state.error!!
                 state.partial.isNotBlank() -> state.partial

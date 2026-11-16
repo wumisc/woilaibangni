@@ -58,6 +58,8 @@ import io.github.wumisc.woilaibangni.core.aac.AacDeck
 import io.github.wumisc.woilaibangni.core.aac.BoardDefaults
 import io.github.wumisc.woilaibangni.core.asr.AsrSession
 import io.github.wumisc.woilaibangni.core.log.LogHub
+import io.github.wumisc.woilaibangni.core.translate.OnlineTranslator
+import io.github.wumisc.woilaibangni.core.translate.TranslationMode
 import io.github.wumisc.woilaibangni.core.ocr.PpOcrTextReader
 import io.github.wumisc.woilaibangni.core.ocr.ReadingPipeline
 import io.github.wumisc.woilaibangni.core.tts.AndroidTextSpeaker
@@ -244,8 +246,28 @@ fun App() {
         }
 
         val asrState by asr.state.collectAsState()
+
         var selected by remember { mutableIntStateOf(0) }
         var overlayRunning by remember { mutableStateOf(CaptionOverlayService.running) }
+        val translator = remember { OnlineTranslator() }
+        var translationMode by remember { mutableStateOf(TranslationMode.ORIGINAL) }
+        var translatedText by remember { mutableStateOf("") }
+
+        // 定稿一句就翻一句；翻译失败保留原文，绝不让字幕空着
+        LaunchedEffect(asrState.committed, translationMode) {
+            val source = asrState.committed
+            if (translationMode == TranslationMode.ORIGINAL || source.isBlank()) {
+                translatedText = ""
+                CaptionBus.main.value = source
+                CaptionBus.original.value = ""
+                return@LaunchedEffect
+            }
+            val result = translator.translate(source, translationMode)
+            translatedText = result ?: ""
+            CaptionBus.main.value = result ?: source
+            CaptionBus.original.value = source
+        }
+
 
         fun given(permission: String) = ContextCompat.checkSelfPermission(
             context, permission
@@ -374,6 +396,9 @@ fun App() {
                 },
                 onSpeak = { speaker.speak(it) },
                 overlayRunning = overlayRunning,
+                translationMode = translationMode,
+                translatedText = translatedText,
+                onTranslationMode = { translationMode = it },
                 onToggleOverlay = {
                     if (overlayRunning) {
                         CaptionOverlayService.stop(context)
@@ -424,6 +449,9 @@ private fun Content(
     onCapture: () -> Unit,
     onSpeak: (String) -> Unit,
     overlayRunning: Boolean,
+    translationMode: TranslationMode,
+    translatedText: String,
+    onTranslationMode: (TranslationMode) -> Unit,
     onToggleOverlay: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -459,6 +487,9 @@ private fun Content(
                 notReadyReason = notReadyReason,
                 palette = palette,
                 overlayRunning = overlayRunning,
+                translationMode = translationMode,
+                translatedText = translatedText,
+                onTranslationMode = onTranslationMode,
                 onToggleMic = onToggleMic,
                 onToggleOverlay = onToggleOverlay,
             )
@@ -535,6 +566,9 @@ private fun LiveCaptionCard(
     notReadyReason: String?,
     palette: Palette,
     overlayRunning: Boolean,
+    translationMode: TranslationMode,
+    translatedText: String,
+    onTranslationMode: (TranslationMode) -> Unit,
     onToggleMic: () -> Unit,
     onToggleOverlay: () -> Unit,
 ) {
@@ -548,6 +582,7 @@ private fun LiveCaptionCard(
             text = when {
                 state.error != null -> state.error!!
                 !ready -> notReadyReason ?: "对话引擎还没就绪"
+                translationMode != TranslationMode.ORIGINAL && translatedText.isNotBlank() -> translatedText
                 state.partial.isNotBlank() -> state.partial
                 state.committed.isNotBlank() -> state.committed
                 state.listening -> "正在听……"
@@ -555,6 +590,39 @@ private fun LiveCaptionCard(
             },
             style = TextStyle(fontSize = 22.sp, color = palette.captionText),
         )
+        if (translationMode != TranslationMode.ORIGINAL && state.committed.isNotBlank()) {
+            Spacer(Modifier.height(6.dp))
+            BasicText(
+                text = "原文：${state.committed}",
+                style = TextStyle(fontSize = 13.sp, color = palette.captionSub),
+            )
+        }
+        Spacer(Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TranslationMode.entries.forEach { m ->
+                val active = m == translationMode
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(38.dp)
+                        .background(
+                            if (active) palette.accent else Color(0x22FFFFFF),
+                            RoundedCornerShape(10.dp),
+                        )
+                        .semantics { contentDescription = "语言模式 ${m.label}" }
+                        .clickable { onTranslationMode(m) },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    BasicText(
+                        text = m.label,
+                        style = TextStyle(
+                            fontSize = 13.sp,
+                            color = if (active) Color.White else palette.captionText,
+                        ),
+                    )
+                }
+            }
+        }
         Spacer(Modifier.height(12.dp))
         BasicText(
             text = buildString {

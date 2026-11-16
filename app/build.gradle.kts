@@ -31,6 +31,7 @@ kotlin {
             implementation(project(":core:model"))
             implementation(project(":core:aac"))
             implementation(project(":core:log"))
+            implementation(project(":core:translate"))
             implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
         }
     }
@@ -44,8 +45,8 @@ android {
         applicationId = "io.github.wumisc.woilaibangni"
         minSdk = 26
         targetSdk = 37
-        versionCode = 17
-        versionName = "0.6.0-m16"
+        versionCode = 18
+        versionName = "0.6.1-m17"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
 
